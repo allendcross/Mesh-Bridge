@@ -16,6 +16,7 @@ interface AppStore {
   nodes: MeshNode[];
   aircraft: Aircraft[]; // ADS-B aircraft (ephemeral, snapshot-replaced, NOT persisted)
   stationLocation: StationLocation | null; // server/relay location for map auto-center
+  cotConfig: any | null; // CoT/TAK output config
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
 
@@ -232,6 +233,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ stationLocation: loc });
   });
 
+  // CoT/TAK output config
+  manager.on('cot-config', (config: any) => {
+    set({ cotConfig: config });
+  });
+
   manager.on('bridge-disconnected', () => {
     set({ bridgeConnected: false });
   });
@@ -282,6 +288,7 @@ export const useStore = create<AppStore>((set, get) => {
     nodes: [],
     aircraft: [],
     stationLocation: null,
+    cotConfig: null,
     bridgeConfig: null,
     telemetryHistory: new Map(),
     autoScanEnabled: false,
@@ -308,6 +315,7 @@ export const useStore = create<AppStore>((set, get) => {
       if (result.success) {
         set({ bridgeConnected: true });
         manager.requestStationLocation();
+        manager.requestCotConfig();
 
         // Auto-enable auto-scan when bridge connects
         const state = get();

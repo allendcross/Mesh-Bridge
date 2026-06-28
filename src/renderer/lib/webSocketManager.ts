@@ -445,6 +445,11 @@ export class WebSocketRadioManager {
         }
         break;
 
+      case 'cot-config':
+      case 'cot-config-changed':
+        this.emit('cot-config', data.config);
+        break;
+
       case 'station-location':
         // Server/relay location for auto-centering the Tactical map.
         this.emit('station-location', {
@@ -750,6 +755,20 @@ export class WebSocketRadioManager {
   requestStationLocation() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'get-station-location' }));
+    }
+  }
+
+  /** Ask the bridge for the current CoT/TAK output config. */
+  requestCotConfig() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-cot-config' }));
+    }
+  }
+
+  /** Update the CoT/TAK output config. */
+  setCotConfig(config: any) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set-cot-config', config }));
     }
   }
 

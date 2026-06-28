@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { forward as mgrsForward, toPoint as mgrsToPoint } from 'mgrs';
 import { MeshNode, Radio, Aircraft, StationLocation } from '../types';
+import { useStore } from '../store/useStore';
 
 interface TacticalViewProps {
   nodes: MeshNode[];
@@ -144,6 +145,8 @@ export default function TacticalView({ nodes, radios, aircraft = [], stationLoca
   const [locating, setLocating] = useState(false);
   const [teamChannel, setTeamChannel] = useState<number | null>(null); // null = all channels
   const [hideNonTeam, setHideNonTeam] = useState(false);
+  const manager = useStore(state => state.manager);
+  const cotConfig = useStore(state => state.cotConfig);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
   const [showAircraftTrails, setShowAircraftTrails] = useState(true);
@@ -1149,6 +1152,37 @@ All devices must use the EXACT same PSK and channel index.`;
             <div className="w-4 h-4 rounded-full bg-red-500"></div>
             <span className="text-sm text-slate-300">Stale (&gt; 30 min ago)</span>
           </div>
+        </div>
+      </div>
+
+      {/* TAK / CoT Output */}
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-white mb-1">🪖 TAK Feed (Cursor-on-Target)</h3>
+            <p className="text-xs text-slate-400">
+              Broadcast mesh nodes + aircraft to ATAK on your LAN via UDP multicast.
+              {cotConfig && (
+                <span className="text-slate-500">
+                  {' '}→ {cotConfig.multicastAddr}:{cotConfig.multicastPort}
+                </span>
+              )}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Multicast stays on the local subnet (won't traverse Tailscale/WAN). ATAK clients auto-discover it.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 flex-shrink-0">
+            <span className={`text-sm font-medium ${cotConfig?.enabled ? 'text-green-400' : 'text-slate-400'}`}>
+              {cotConfig?.enabled ? 'ON' : 'OFF'}
+            </span>
+            <input
+              type="checkbox"
+              checked={!!cotConfig?.enabled}
+              onChange={(e) => manager.setCotConfig({ enabled: e.target.checked })}
+              className="w-5 h-5 text-green-600 bg-slate-700 border-slate-600 rounded focus:ring-green-500"
+            />
+          </label>
         </div>
       </div>
     </div>

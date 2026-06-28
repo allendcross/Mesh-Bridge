@@ -29,6 +29,7 @@ import mqtt from 'mqtt';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import { AdsbService } from './services/AdsbService.mjs';
+import { CotService } from './services/CotService.mjs';
 import fetch from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
@@ -206,6 +207,20 @@ class MeshtasticBridgeServer {
     this.stationLat = null;          // configured override (exact)
     this.stationLon = null;          // configured override (exact)
     this.stationLocation = null;     // resolved { lat, lon, source, label }
+
+    // ===== CoT / TAK OUTPUT =====
+    // Emit Cursor-on-Target for mesh nodes + aircraft so ATAK sees them (LAN multicast).
+    this.cotEnabled = false;                 // off by default — emits to the network when on
+    this.cotMulticastAddr = '239.2.3.1';     // ATAK default SA multicast group
+    this.cotMulticastPort = 6969;            // ATAK default SA port
+    this.cotMulticastTtl = 1;                // keep on local subnet
+    this.cotCallsignPrefix = '';             // optional prefix for node callsigns
+    this.cotNodeStaleSec = 300;              // CoT stale time for nodes
+    this.cotAircraftStaleSec = 60;           // CoT stale time for aircraft
+    this.cotPublishNodes = true;
+    this.cotPublishAircraft = true;
+    this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
+    this.cotService = null;                  // CotService instance
 
     // ===== PORT EXCLUSION CONFIGURATION =====
     // Ports to exclude from bridge usage (persists across reboots)
@@ -428,6 +443,21 @@ class MeshtasticBridgeServer {
           if (config.station.lon !== undefined) this.stationLon = config.station.lon;
         }
 
+        // Load CoT / TAK output configuration
+        if (config.cot) {
+          if (config.cot.enabled !== undefined) this.cotEnabled = config.cot.enabled;
+          if (config.cot.multicastAddr) this.cotMulticastAddr = config.cot.multicastAddr;
+          if (config.cot.multicastPort !== undefined) this.cotMulticastPort = config.cot.multicastPort;
+          if (config.cot.multicastTtl !== undefined) this.cotMulticastTtl = config.cot.multicastTtl;
+          if (config.cot.callsignPrefix !== undefined) this.cotCallsignPrefix = config.cot.callsignPrefix;
+          if (config.cot.nodeStaleSec !== undefined) this.cotNodeStaleSec = config.cot.nodeStaleSec;
+          if (config.cot.aircraftStaleSec !== undefined) this.cotAircraftStaleSec = config.cot.aircraftStaleSec;
+          if (config.cot.publishNodes !== undefined) this.cotPublishNodes = config.cot.publishNodes;
+          if (config.cot.publishAircraft !== undefined) this.cotPublishAircraft = config.cot.publishAircraft;
+          if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
+          console.log(`📋 Loaded CoT/TAK config: ${this.cotEnabled ? 'ENABLED' : 'DISABLED'}`);
+        }
+
         // Load Port Exclusion configuration
         if (Array.isArray(config.excludedPorts)) {
           this.excludedPorts = config.excludedPorts;
@@ -507,6 +537,18 @@ class MeshtasticBridgeServer {
         station: {
           lat: this.stationLat,
           lon: this.stationLon
+        },
+        cot: {
+          enabled: this.cotEnabled,
+          multicastAddr: this.cotMulticastAddr,
+          multicastPort: this.cotMulticastPort,
+          multicastTtl: this.cotMulticastTtl,
+          callsignPrefix: this.cotCallsignPrefix,
+          nodeStaleSec: this.cotNodeStaleSec,
+          aircraftStaleSec: this.cotAircraftStaleSec,
+          publishNodes: this.cotPublishNodes,
+          publishAircraft: this.cotPublishAircraft,
+          teamColor: this.cotTeamColor
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -1245,6 +1287,9 @@ class MeshtasticBridgeServer {
       // Start ADS-B aircraft polling (if enabled)
       this.startAdsbService();
 
+      // Start CoT/TAK output (if enabled)
+      this.startCotService();
+
       // Resolve where the server is, to auto-center the Tactical map
       this.resolveStationLocation();
 
@@ -1393,6 +1438,14 @@ class MeshtasticBridgeServer {
           } else {
             this.resolveStationLocation();
           }
+          break;
+
+        case 'get-cot-config':
+          this.sendCotConfig(ws);
+          break;
+
+        case 'set-cot-config':
+          await this.cotSetConfig(ws, message.config || {});
           break;
 
         case 'set-adsb-config':
@@ -1922,6 +1975,9 @@ class MeshtasticBridgeServer {
             fromRadio: radioId
           }
         });
+
+        // Also emit this node as a CoT track for ATAK (if enabled)
+        this.cotService?.publishNode(meshNode);
       });
 
       protocolHandler.on('config', (configData) => {
@@ -5843,7 +5899,13 @@ class MeshtasticBridgeServer {
     this.stopAdsbService();
     this.adsbService = new AdsbService(
       this.adsbOptions(),
-      (payload) => this.broadcast(payload),
+      (payload) => {
+        this.broadcast(payload);
+        // Mirror aircraft to the CoT/TAK feed (if enabled)
+        if (payload.type === 'aircraft-update' && payload.aircraft) {
+          this.cotService?.publishAircraft(payload.aircraft);
+        }
+      },
       (level, msg) => console.log(msg)
     );
     this.adsbService.start();
@@ -5854,6 +5916,64 @@ class MeshtasticBridgeServer {
     if (this.adsbService) {
       this.adsbService.stop();
       this.adsbService = null;
+    }
+  }
+
+  // ===== CoT / TAK OUTPUT =====
+
+  cotOptions() {
+    return {
+      enabled: this.cotEnabled,
+      multicastAddr: this.cotMulticastAddr,
+      multicastPort: this.cotMulticastPort,
+      multicastTtl: this.cotMulticastTtl,
+      callsignPrefix: this.cotCallsignPrefix,
+      nodeStaleSec: this.cotNodeStaleSec,
+      aircraftStaleSec: this.cotAircraftStaleSec,
+      publishNodes: this.cotPublishNodes,
+      publishAircraft: this.cotPublishAircraft,
+      teamColor: this.cotTeamColor,
+    };
+  }
+
+  startCotService() {
+    this.stopCotService();
+    this.cotService = new CotService(this.cotOptions(), (level, msg) => console.log(msg));
+    this.cotService.start();
+  }
+
+  stopCotService() {
+    if (this.cotService) {
+      this.cotService.stop();
+      this.cotService = null;
+    }
+  }
+
+  sendCotConfig(ws) {
+    ws.send(JSON.stringify({ type: 'cot-config', config: this.cotOptions() }));
+  }
+
+  async cotSetConfig(ws, config) {
+    try {
+      if (config.enabled !== undefined) this.cotEnabled = config.enabled;
+      if (config.multicastAddr) this.cotMulticastAddr = config.multicastAddr;
+      if (config.multicastPort !== undefined) this.cotMulticastPort = config.multicastPort;
+      if (config.callsignPrefix !== undefined) this.cotCallsignPrefix = config.callsignPrefix;
+      if (config.nodeStaleSec !== undefined) this.cotNodeStaleSec = config.nodeStaleSec;
+      if (config.aircraftStaleSec !== undefined) this.cotAircraftStaleSec = config.aircraftStaleSec;
+      if (config.publishNodes !== undefined) this.cotPublishNodes = config.publishNodes;
+      if (config.publishAircraft !== undefined) this.cotPublishAircraft = config.publishAircraft;
+      if (config.teamColor) this.cotTeamColor = config.teamColor;
+
+      this.saveConfig();
+      this.startCotService();
+
+      console.log(`✅ CoT/TAK configuration updated (enabled: ${this.cotEnabled})`);
+      ws.send(JSON.stringify({ type: 'cot-config-updated', success: true }));
+      this.broadcast({ type: 'cot-config-changed', config: this.cotOptions() });
+    } catch (error) {
+      console.error('❌ Error setting CoT config:', error);
+      ws.send(JSON.stringify({ type: 'cot-config-updated', success: false, error: error.message }));
     }
   }
 
@@ -5914,6 +6034,9 @@ class MeshtasticBridgeServer {
 
     // Stop ADS-B poller
     this.stopAdsbService();
+
+    // Stop CoT/TAK output
+    this.stopCotService();
 
     // Disconnect all radios
     for (const [radioId, radio] of this.radios.entries()) {
