@@ -30,7 +30,20 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import fetch from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import noble from '@abandonware/noble';
+
+// Try to import noble (Bluetooth support) - gracefully handle if not available
+// This prevents errors in environments without Bluetooth support (containers, VMs, etc.)
+let noble = null;
+try {
+  const nobleModule = await import('@abandonware/noble');
+  noble = nobleModule.default;
+  console.log('✅ Bluetooth support available');
+} catch (err) {
+  console.warn('⚠️  Bluetooth not available on this system - BLE scanning disabled');
+  console.warn('   This is normal in containers or VMs without Bluetooth hardware');
+  console.warn(`   Technical reason: ${err.message}`);
+  noble = null;
+}
 
 // Make crypto available globally for @meshtastic libraries (if not already available)
 // Node.js v20+ already has crypto on globalThis, so only set if undefined
@@ -1517,6 +1530,17 @@ class MeshtasticBridgeServer {
    */
   async scanBluetoothDevices(ws, scanDuration = 10000) {
     try {
+      // Check if Bluetooth support is available
+      if (!noble) {
+        console.warn('⚠️  Bluetooth scanning not available on this system');
+        ws.send(JSON.stringify({
+          type: 'bluetooth-devices-list',
+          devices: [],
+          error: 'Bluetooth not available on this system'
+        }));
+        return;
+      }
+
       console.log(`🔵 Scanning for Bluetooth devices (${scanDuration/1000}s)...`);
 
       const devices = [];

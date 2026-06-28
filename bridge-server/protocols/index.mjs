@@ -6,10 +6,11 @@
 
 import { BaseProtocol } from './BaseProtocol.mjs';
 import { MeshtasticProtocol } from './MeshtasticProtocol.mjs';
-import { BluetoothProtocol } from './BluetoothProtocol.mjs';
+// BluetoothProtocol disabled - requires @abandonware/noble which is not available in all environments
+// import { BluetoothProtocol } from './BluetoothProtocol.mjs';
 
 // Re-export for convenience
-export { BaseProtocol, MeshtasticProtocol, BluetoothProtocol };
+export { BaseProtocol, MeshtasticProtocol };
 
 /**
  * Factory function to create protocol handler
@@ -25,10 +26,10 @@ export function createProtocol(protocol, radioId, portPath, options = {}) {
       return new MeshtasticProtocol(radioId, portPath, options);
 
     case 'bluetooth':
-      return new BluetoothProtocol(radioId, portPath, options);
+      throw new Error(`Bluetooth protocol not available - @abandonware/noble package is not installed`);
 
     default:
-      throw new Error(`Unknown protocol: ${protocol}. Supported protocols: 'meshtastic', 'bluetooth'`);
+      throw new Error(`Unknown protocol: ${protocol}. Supported protocols: 'meshtastic'`);
   }
 }
 
@@ -37,5 +38,5 @@ export function createProtocol(protocol, radioId, portPath, options = {}) {
  * @returns {Array<string>} Array of supported protocol names
  */
 export function getSupportedProtocols() {
-  return ['meshtastic', 'bluetooth'];
+  return ['meshtastic'];
 }
