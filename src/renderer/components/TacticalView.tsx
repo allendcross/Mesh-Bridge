@@ -101,6 +101,12 @@ interface Contact {
   lon?: number;
 }
 
+interface AircraftTrail {
+  icao: string;
+  emergency: boolean;
+  positions: Array<{ lat: number; lon: number; t: number }>;
+}
+
 export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalViewProps) {
   const [showSidebar, setShowSidebar] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<'all' | ContactSource>('all');
@@ -108,6 +114,9 @@ export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalV
   const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
+  const [showAircraftTrails, setShowAircraftTrails] = useState(true);
+  const [aircraftTrailAge, setAircraftTrailAge] = useState(2); // minutes (aircraft move fast)
+  const [aircraftTrails, setAircraftTrails] = useState<Map<string, AircraftTrail>>(new Map());
   const [showBreadcrumbs, setShowBreadcrumbs] = useState(true);
   const [breadcrumbAge, setBreadcrumbAge] = useState(60); // minutes
   const [gpsTrails, setGpsTrails] = useState<Map<string, GPSTrack>>(new Map());
@@ -152,6 +161,37 @@ export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalV
 
     setGpsTrails(newTrails);
   }, [nodes, breadcrumbAge]);
+
+  // Accumulate aircraft position history into short-lived trails. Aircraft arrive
+  // as snapshot-replaced arrays every ~2s, so we append per-ICAO here, prune points
+  // older than the (short) trail window, and drop trails for aircraft that have left.
+  useEffect(() => {
+    const now = Date.now();
+    const cutoff = now - aircraftTrailAge * 60 * 1000;
+    const next = new Map(aircraftTrails);
+
+    for (const ac of aircraft) {
+      if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue;
+      const trail = next.get(ac.icao) || { icao: ac.icao, emergency: false, positions: [] };
+      trail.emergency = !!ac.emergency;
+
+      const last = trail.positions[trail.positions.length - 1];
+      const moved = !last ||
+        Math.abs(last.lat - ac.lat) > 0.0002 ||
+        Math.abs(last.lon - ac.lon) > 0.0002;
+      if (moved) trail.positions.push({ lat: ac.lat, lon: ac.lon, t: now });
+
+      next.set(ac.icao, trail);
+    }
+
+    // Prune old points and drop trails that have fully aged out (aircraft gone).
+    for (const [icao, trail] of next) {
+      trail.positions = trail.positions.filter(p => p.t > cutoff).slice(-300);
+      if (trail.positions.length === 0) next.delete(icao);
+    }
+
+    setAircraftTrails(next);
+  }, [aircraft, aircraftTrailAge]);
 
   // Generate secure channel configuration
   const generateTacticalChannel = () => {
@@ -571,6 +611,30 @@ All devices must use the EXACT same PSK and channel index.`;
           </div>
 
           <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="aircraftTrails"
+              checked={showAircraftTrails}
+              onChange={(e) => setShowAircraftTrails(e.target.checked)}
+              className="w-4 h-4 text-cyan-500 bg-slate-700 border-slate-600 rounded focus:ring-cyan-500"
+            />
+            <label htmlFor="aircraftTrails" className="text-sm text-slate-300">
+              Aircraft Trails
+            </label>
+            <select
+              value={aircraftTrailAge}
+              onChange={(e) => setAircraftTrailAge(parseInt(e.target.value))}
+              className="bg-slate-700 text-white text-sm rounded px-2 py-1 border border-slate-600"
+            >
+              <option value="1">1 min</option>
+              <option value="2">2 min</option>
+              <option value="5">5 min</option>
+              <option value="10">10 min</option>
+              <option value="15">15 min</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
             <label className="text-sm text-slate-300">Trail Age:</label>
             <select
               value={breadcrumbAge}
@@ -745,6 +809,20 @@ All devices must use the EXACT same PSK and channel index.`;
                   opacity: 0.7,
                   dashArray: '5, 10',
                 }}
+              />
+            );
+          })}
+
+          {/* Aircraft Trails */}
+          {showAircraft && showAircraftTrails && Array.from(aircraftTrails.values()).map(trail => {
+            if (trail.positions.length < 2) return null;
+            const coords: [number, number][] = trail.positions.map(p => [p.lat, p.lon]);
+            const color = trail.emergency ? '#ef4444' : '#22d3ee';
+            return (
+              <Polyline
+                key={`ac-trail-${trail.icao}`}
+                positions={coords}
+                pathOptions={{ color, weight: 2, opacity: 0.55 }}
               />
             );
           })}
