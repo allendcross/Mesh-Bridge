@@ -145,6 +145,14 @@ export interface Aircraft {
   emergency?: boolean;     // squawk is 7500/7600/7700
 }
 
+// Server/relay location used to auto-center the Tactical map.
+export interface StationLocation {
+  lat: number;
+  lon: number;
+  source: 'config' | 'ip';
+  label?: string;
+}
+
 export interface TelemetrySnapshot {
   timestamp: Date;
   nodeId: string;

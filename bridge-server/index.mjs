@@ -200,6 +200,13 @@ class MeshtasticBridgeServer {
     this.adsbMaxAircraft = 500;                                       // safety cap
     this.adsbService = null;                                          // AdsbService instance
 
+    // ===== STATION LOCATION =====
+    // Where the server/relay is, used to auto-center the Tactical map. Resolved
+    // from a configured lat/lon if set, otherwise from IP geolocation (approx).
+    this.stationLat = null;          // configured override (exact)
+    this.stationLon = null;          // configured override (exact)
+    this.stationLocation = null;     // resolved { lat, lon, source, label }
+
     // ===== PORT EXCLUSION CONFIGURATION =====
     // Ports to exclude from bridge usage (persists across reboots)
     // Useful for: Reserving ports for other applications, preventing accidental connections
@@ -415,6 +422,12 @@ class MeshtasticBridgeServer {
           console.log(`📋 Loaded ADS-B config: ${this.adsbEnabled ? 'ENABLED' : 'DISABLED'} (source: ${this.adsbSource})`);
         }
 
+        // Load Station location override
+        if (config.station) {
+          if (config.station.lat !== undefined) this.stationLat = config.station.lat;
+          if (config.station.lon !== undefined) this.stationLon = config.station.lon;
+        }
+
         // Load Port Exclusion configuration
         if (Array.isArray(config.excludedPorts)) {
           this.excludedPorts = config.excludedPorts;
@@ -490,6 +503,10 @@ class MeshtasticBridgeServer {
           pollIntervalMs: this.adsbPollIntervalMs,
           staleSeconds: this.adsbStaleSeconds,
           maxAircraft: this.adsbMaxAircraft
+        },
+        station: {
+          lat: this.stationLat,
+          lon: this.stationLon
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -1115,6 +1132,11 @@ class MeshtasticBridgeServer {
       console.log('📱 PWA client connected');
       this.clients.add(ws);
 
+      // Send station location to new client (for map auto-center)
+      if (this.stationLocation) {
+        ws.send(JSON.stringify({ type: 'station-location', ...this.stationLocation }));
+      }
+
       // Send recent message history to new client
       ws.send(JSON.stringify({
         type: 'history',
@@ -1222,6 +1244,9 @@ class MeshtasticBridgeServer {
 
       // Start ADS-B aircraft polling (if enabled)
       this.startAdsbService();
+
+      // Resolve where the server is, to auto-center the Tactical map
+      this.resolveStationLocation();
 
       // Connect to MQTT if enabled
       if (this.mqttEnabled && this.mqttBrokerUrl) {
@@ -1360,6 +1385,14 @@ class MeshtasticBridgeServer {
 
         case 'get-adsb-config':
           this.sendAdsbConfig(ws);
+          break;
+
+        case 'get-station-location':
+          if (this.stationLocation) {
+            ws.send(JSON.stringify({ type: 'station-location', ...this.stationLocation }));
+          } else {
+            this.resolveStationLocation();
+          }
           break;
 
         case 'set-adsb-config':
@@ -5754,6 +5787,38 @@ class MeshtasticBridgeServer {
       this.adBotTimer = null;
       console.log('📢 Advertisement bot stopped');
     }
+  }
+
+  // ===== STATION LOCATION =====
+
+  /** Resolve the server/relay location (config override, else IP geolocation). */
+  async resolveStationLocation() {
+    if (typeof this.stationLat === 'number' && typeof this.stationLon === 'number') {
+      this.stationLocation = { lat: this.stationLat, lon: this.stationLon, source: 'config' };
+    } else {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch('http://ip-api.com/json/?fields=status,lat,lon,city,regionName', { signal: controller.signal });
+        clearTimeout(t);
+        const j = await res.json();
+        if (j.status === 'success' && typeof j.lat === 'number') {
+          this.stationLocation = {
+            lat: j.lat,
+            lon: j.lon,
+            source: 'ip',
+            label: [j.city, j.regionName].filter(Boolean).join(', '),
+          };
+        }
+      } catch (err) {
+        console.warn(`⚠️  Station IP geolocation failed: ${err.message}`);
+      }
+    }
+    if (this.stationLocation) {
+      console.log(`📍 Station location: ${this.stationLocation.lat.toFixed(4)}, ${this.stationLocation.lon.toFixed(4)} (${this.stationLocation.source}${this.stationLocation.label ? `: ${this.stationLocation.label}` : ''})`);
+      this.broadcast({ type: 'station-location', ...this.stationLocation });
+    }
+    return this.stationLocation;
   }
 
   // ===== ADS-B (AIRCRAFT TRACKING) =====

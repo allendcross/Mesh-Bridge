@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { WebSocketRadioManager } from '../lib/webSocketManager';
-import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot, Aircraft } from '../types';
+import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot, Aircraft, StationLocation } from '../types';
 
 interface AppStore {
   // Manager instance
@@ -15,6 +15,7 @@ interface AppStore {
   messages: Message[];
   nodes: MeshNode[];
   aircraft: Aircraft[]; // ADS-B aircraft (ephemeral, snapshot-replaced, NOT persisted)
+  stationLocation: StationLocation | null; // server/relay location for map auto-center
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
 
@@ -226,6 +227,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ aircraft });
   });
 
+  // Server/relay location for map auto-center
+  manager.on('station-location', (loc: StationLocation) => {
+    set({ stationLocation: loc });
+  });
+
   manager.on('bridge-disconnected', () => {
     set({ bridgeConnected: false });
   });
@@ -275,6 +281,7 @@ export const useStore = create<AppStore>((set, get) => {
     messages: [],
     nodes: [],
     aircraft: [],
+    stationLocation: null,
     bridgeConfig: null,
     telemetryHistory: new Map(),
     autoScanEnabled: false,
@@ -300,6 +307,7 @@ export const useStore = create<AppStore>((set, get) => {
       const result = await manager.connectToBridge();
       if (result.success) {
         set({ bridgeConnected: true });
+        manager.requestStationLocation();
 
         // Auto-enable auto-scan when bridge connects
         const state = get();

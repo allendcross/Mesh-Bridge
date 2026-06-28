@@ -435,6 +435,16 @@ export class WebSocketRadioManager {
         }
         break;
 
+      case 'station-location':
+        // Server/relay location for auto-centering the Tactical map.
+        this.emit('station-location', {
+          lat: data.lat,
+          lon: data.lon,
+          source: data.source,
+          label: data.label,
+        });
+        break;
+
       case 'aircraft-update':
         // ADS-B aircraft snapshot from the bridge. Ephemeral + high-volume:
         // emit straight through, snapshot-replace in the store, NEVER persist.
@@ -726,6 +736,13 @@ export class WebSocketRadioManager {
   /**
    * Request list of available serial ports from bridge
    */
+  /** Ask the bridge for the server/relay location (auto-center the map). */
+  requestStationLocation() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-station-location' }));
+    }
+  }
+
   async scanForRadios(): Promise<any[]> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.log('error', 'Not connected to bridge server');

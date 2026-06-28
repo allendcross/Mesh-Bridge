@@ -1,14 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MeshNode, Radio, Aircraft } from '../types';
+import { forward as mgrsForward, toPoint as mgrsToPoint } from 'mgrs';
+import { MeshNode, Radio, Aircraft, StationLocation } from '../types';
 
 interface TacticalViewProps {
   nodes: MeshNode[];
   radios: Radio[];
   aircraft?: Aircraft[];
+  stationLocation?: StationLocation | null;
 }
+
+// ~40 mile view radius for the initial auto-center (80 mile / 128.7 km square).
+const STATION_VIEW_METERS = 80 * 1609.34;
 
 // ADS-B display tuning: drop positions older than STALE, fade them from FADE_START.
 const AIRCRAFT_STALE_SEC = 15;
@@ -77,6 +82,27 @@ function FlyTo({ target }: { target: [number, number] | null }) {
   return null;
 }
 
+// One-shot auto-center on the server/relay location at ~40 mile radius.
+function StationFit({ station }: { station: StationLocation | null | undefined }) {
+  const map = useMap();
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (fitted.current || !station) return;
+    map.fitBounds(L.latLng(station.lat, station.lon).toBounds(STATION_VIEW_METERS));
+    fitted.current = true;
+  }, [station, map]);
+  return null;
+}
+
+// Report the map cursor's lat/lng up to the component for the coordinate readout.
+function MouseCoords({ onMove }: { onMove: (latlng: { lat: number; lng: number } | null) => void }) {
+  useMapEvents({
+    mousemove: (e) => onMove({ lat: e.latlng.lat, lng: e.latlng.lng }),
+    mouseout: () => onMove(null),
+  });
+  return null;
+}
+
 // Re-measure the map whenever `trigger` changes (e.g. the sidebar opens/closes
 // and the map's width changes), so Leaflet doesn't leave grey gutters.
 function InvalidateSize({ trigger }: { trigger: unknown }) {
@@ -107,11 +133,15 @@ interface AircraftTrail {
   positions: Array<{ lat: number; lon: number; t: number }>;
 }
 
-export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalViewProps) {
+export default function TacticalView({ nodes, radios, aircraft = [], stationLocation }: TacticalViewProps) {
   const [showSidebar, setShowSidebar] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<'all' | ContactSource>('all');
   const [contactSearch, setContactSearch] = useState('');
   const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
+  const [cursor, setCursor] = useState<{ lat: number; lng: number } | null>(null);
+  const [gotoInput, setGotoInput] = useState('');
+  const [gotoError, setGotoError] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
   const [showAircraftTrails, setShowAircraftTrails] = useState(true);
@@ -411,6 +441,86 @@ All devices must use the EXACT same PSK and channel index.`;
   ];
   const sourceTag = (s: ContactSource) => (s === 'meshtastic' ? 'MESH' : s === 'adsb' ? 'ADS-B' : 'TAK');
 
+  // Jump to the viewer's GPS location (needs a secure context: HTTPS or localhost).
+  const goToMyLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setGotoError('Geolocation is not supported by this browser.');
+      return;
+    }
+    setLocating(true);
+    setGotoError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        setFlyTo([pos.coords.latitude, pos.coords.longitude]);
+      },
+      (err) => {
+        setLocating(false);
+        setGotoError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location blocked. Browser geolocation needs HTTPS (or localhost); this page is served over http on the LAN.'
+            : `Could not get your location: ${err.message}`
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Jump to a typed lat/lon, MGRS grid reference, or street address.
+  const handleGoto = async () => {
+    const q = gotoInput.trim();
+    if (!q) return;
+    setGotoError(null);
+
+    // 1) "lat, lon" or "lat lon"
+    const ll = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (ll) {
+      const lat = parseFloat(ll[1]);
+      const lon = parseFloat(ll[2]);
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        setFlyTo([lat, lon]);
+        return;
+      }
+    }
+
+    // 2) MGRS grid reference, e.g. "11SPA5792709426"
+    const mgrsCandidate = q.replace(/\s+/g, '').toUpperCase();
+    if (/^\d{1,2}[C-X][A-Z]{2}\d+$/.test(mgrsCandidate)) {
+      try {
+        const [lon, lat] = mgrsToPoint(mgrsCandidate);
+        setFlyTo([lat, lon]);
+        return;
+      } catch {
+        // not valid MGRS — fall through to address lookup
+      }
+    }
+
+    // 3) Street address / place name via OpenStreetMap Nominatim
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
+      );
+      const j = await res.json();
+      if (Array.isArray(j) && j.length > 0) {
+        setFlyTo([parseFloat(j[0].lat), parseFloat(j[0].lon)]);
+        return;
+      }
+      setGotoError('No match found for that address.');
+    } catch (e: any) {
+      setGotoError(`Lookup failed: ${e.message}`);
+    }
+  };
+
+  // MGRS for the cursor readout (mgrs.forward takes [lon, lat]).
+  const cursorMgrs = (() => {
+    if (!cursor) return '';
+    try {
+      return mgrsForward([cursor.lng, cursor.lat]);
+    } catch {
+      return '—';
+    }
+  })();
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -672,6 +782,43 @@ All devices must use the EXACT same PSK and channel index.`;
             </button>
           </div>
         </div>
+
+        {/* Go-to & location tools */}
+        <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-slate-700">
+          <button
+            onClick={goToMyLocation}
+            disabled={locating}
+            className="text-xs px-3 py-1.5 rounded bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-50"
+          >
+            {locating ? '📡 Locating…' : '📍 My Location'}
+          </button>
+          {stationLocation && (
+            <button
+              onClick={() => setFlyTo([stationLocation.lat, stationLocation.lon])}
+              className="text-xs px-3 py-1.5 rounded bg-slate-700 text-white hover:bg-slate-600"
+              title={`Station${stationLocation.label ? `: ${stationLocation.label}` : ''} (${stationLocation.source})`}
+            >
+              🏠 Station
+            </button>
+          )}
+          <div className="flex items-center gap-1 flex-1 min-w-[260px]">
+            <input
+              type="text"
+              value={gotoInput}
+              onChange={(e) => setGotoInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleGoto(); }}
+              placeholder="Go to: address, lat,lon, or MGRS…"
+              className="flex-1 bg-slate-700 text-white text-xs rounded px-2 py-1.5 border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            />
+            <button
+              onClick={handleGoto}
+              className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500"
+            >
+              Go
+            </button>
+          </div>
+          {gotoError && <span className="text-xs text-red-400 w-full">{gotoError}</span>}
+        </div>
       </div>
 
       {/* Tactical Map + Contacts Sidebar */}
@@ -765,6 +912,8 @@ All devices must use the EXACT same PSK and channel index.`;
         >
           <InvalidateSize trigger={showSidebar} />
           <FlyTo target={flyTo} />
+          <MouseCoords onMove={setCursor} />
+          <StationFit station={stationLocation} />
           <AutoFitBounds nodes={nodesWithPosition} />
           <AircraftInitialFit aircraft={visibleAircraft} hasPositionedNodes={nodesWithPosition.length > 0} />
 
@@ -903,6 +1052,14 @@ All devices must use the EXACT same PSK and channel index.`;
             </Marker>
           ))}
         </MapContainer>
+
+        {/* Cursor coordinate readout */}
+        {cursor && (
+          <div className="absolute bottom-2 left-2 z-[500] bg-slate-900/85 text-slate-200 text-[11px] font-mono px-2 py-1 rounded border border-slate-700 pointer-events-none leading-tight">
+            <div>LL: {cursor.lat.toFixed(5)}, {cursor.lng.toFixed(5)}</div>
+            <div>MGRS: {cursorMgrs}</div>
+          </div>
+        )}
         </div>
       </div>
 
