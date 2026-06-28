@@ -9,7 +9,6 @@ export function getNavigationConfig(
 ): NavGroup[] {
   const connectedRadios = radios.filter(r => r.status === 'connected');
   const errorLogs = logs.filter(l => l.level === 'error');
-  const nodesWithPosition = nodes.filter(n => n.position);
   const recentActiveNodes = nodes.filter(n =>
     n.position && n.lastHeard && (Date.now() - n.lastHeard.getTime()) < 5 * 60 * 1000
   );
@@ -47,12 +46,6 @@ export function getNavigationConfig(
     {
       label: 'Monitoring',
       items: [
-        {
-          id: 'map',
-          icon: 'map',
-          label: 'Map',
-          badge: () => nodesWithPosition.length
-        },
         {
           id: 'tactical',
           icon: 'tactical',

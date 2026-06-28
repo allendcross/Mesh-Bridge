@@ -75,8 +75,6 @@ function App() {
         return { nodes, radios };
       case 'messages':
         return { messages, radios };
-      case 'map':
-        return { nodes, radios };
       case 'tactical':
         return { nodes, radios, aircraft };
       case 'siteplanner':

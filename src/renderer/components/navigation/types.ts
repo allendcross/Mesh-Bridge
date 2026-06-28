@@ -5,7 +5,6 @@ export type Tab =
   | 'devices'
   | 'nodes'
   | 'messages'
-  | 'map'
   | 'tactical'
   | 'siteplanner'
   | 'networkhealth'
