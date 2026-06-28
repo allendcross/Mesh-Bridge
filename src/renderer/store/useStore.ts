@@ -94,6 +94,10 @@ interface AppStore {
   // ADS-B Actions
   getAdsbConfig: () => void;
   setAdsbConfig: (config: any) => void;
+
+  // CoT / TAK Actions
+  getCotConfig: () => void;
+  setCotConfig: (config: any) => void;
 }
 
 export const useStore = create<AppStore>((set, get) => {
@@ -598,6 +602,15 @@ export const useStore = create<AppStore>((set, get) => {
 
     setAdsbConfig: (config: any) => {
       manager.setAdsbConfig(config);
+    },
+
+    // CoT / TAK Actions
+    getCotConfig: () => {
+      manager.requestCotConfig();
+    },
+
+    setCotConfig: (config: any) => {
+      manager.setCotConfig(config);
     },
   };
 });

@@ -6,8 +6,9 @@ import CommunicationSettings from './CommunicationSettings';
 import MQTTSettings from './MQTTSettings';
 import AdvertisementBotSettings from './AdvertisementBotSettings';
 import AdsbSettings from './AdsbSettings';
+import CotSettings from './CotSettings';
 
-type IntegrationTab = 'ai' | 'ollama' | 'communication' | 'mqtt' | 'adbot' | 'adsb';
+type IntegrationTab = 'ai' | 'ollama' | 'communication' | 'mqtt' | 'adbot' | 'adsb' | 'tak';
 
 export default function Integrations() {
   const [activeTab, setActiveTab] = useState<IntegrationTab>('ai');
@@ -18,6 +19,7 @@ export default function Integrations() {
     { id: 'communication', label: 'Email & Discord', icon: '📧' },
     { id: 'mqtt', label: 'MQTT', icon: '📡' },
     { id: 'adsb', label: 'ADS-B', icon: '✈️' },
+    { id: 'tak', label: 'TAK Feed', icon: '🪖' },
     { id: 'adbot', label: 'Advertisement Bot', icon: '📢' },
   ];
 
@@ -57,6 +59,7 @@ export default function Integrations() {
         {activeTab === 'communication' && <CommunicationSettings />}
         {activeTab === 'mqtt' && <MQTTSettings />}
         {activeTab === 'adsb' && <AdsbSettings />}
+        {activeTab === 'tak' && <CotSettings />}
         {activeTab === 'adbot' && <AdvertisementBotSettings />}
       </div>
     </div>
