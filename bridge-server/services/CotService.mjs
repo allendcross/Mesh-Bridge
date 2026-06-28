@@ -13,6 +13,7 @@
  */
 
 import dgram from 'dgram';
+import net from 'net';
 
 const escapeXml = (s) => String(s ?? '').replace(/[<>&'"]/g, (c) => (
   { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
@@ -28,37 +29,102 @@ export class CotService {
   constructor(opts, logger) {
     this.opts = opts;
     this.log = logger || ((level, msg) => console.log(msg));
-    this.socket = null;
+    this.socket = null;       // UDP multicast socket
+    this.tcpSocket = null;    // TCP feed to a TAK server (e.g. FreeTAKServer)
+    this.tcpConnected = false;
+    this.tcpReconnectTimer = null;
+    this.stopped = true;
+    // Outbound CoT is paced through a queue so a burst (e.g. many aircraft) doesn't
+    // coalesce in the TCP stream — some TAK servers (FreeTAKServer) mis-parse two
+    // CoT events read together. One event per drain tick keeps each self-contained.
+    this.queue = [];
+    this.drainTimer = null;
   }
 
   start() {
     this.stop();
+    this.stopped = false;
     if (!this.opts.enabled) {
       this.log('info', 'ℹ️  CoT/TAK output disabled');
       return;
     }
-    this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-    this.socket.on('error', (e) => this.log('warn', `⚠️  CoT socket error: ${e.message}`));
-    this.socket.bind(() => {
-      try { this.socket.setMulticastTTL(this.opts.multicastTtl || 1); } catch { /* ignore */ }
-      this.log('info', `🪖 CoT/TAK output → ${this.opts.multicastAddr}:${this.opts.multicastPort} (multicast)`);
+    // UDP multicast output (LAN ATAK auto-discovery)
+    if (this.opts.multicastEnabled !== false) {
+      this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+      this.socket.on('error', (e) => this.log('warn', `⚠️  CoT multicast error: ${e.message}`));
+      this.socket.bind(() => {
+        try { this.socket.setMulticastTTL(this.opts.multicastTtl || 1); } catch { /* ignore */ }
+        this.log('info', `🪖 CoT multicast → ${this.opts.multicastAddr}:${this.opts.multicastPort}`);
+      });
+    }
+    // TCP feed to a TAK server (e.g. FreeTAKServer on 8087)
+    if (this.opts.tcpHost && this.opts.tcpPort) {
+      this.connectTcp();
+    }
+    // Drain the outbound queue, one CoT event per tick.
+    this.drainTimer = setInterval(() => this.drain(), 30);
+  }
+
+  connectTcp() {
+    if (this.stopped) return;
+    this.log('info', `🪖 CoT TCP feed → ${this.opts.tcpHost}:${this.opts.tcpPort} (connecting…)`);
+    const sock = net.connect({ host: this.opts.tcpHost, port: this.opts.tcpPort });
+    sock.setKeepAlive(true, 15000);
+    sock.on('connect', () => {
+      this.tcpConnected = true;
+      try { sock.setNoDelay(true); } catch { /* ignore */ }
+      this.log('info', `✅ CoT TCP feed connected → ${this.opts.tcpHost}:${this.opts.tcpPort}`);
     });
+    const retry = () => {
+      this.tcpConnected = false;
+      this.tcpSocket = null;
+      if (this.stopped) return;
+      if (this.tcpReconnectTimer) return;
+      this.tcpReconnectTimer = setTimeout(() => {
+        this.tcpReconnectTimer = null;
+        this.connectTcp();
+      }, 5000);
+    };
+    sock.on('error', (e) => { this.log('warn', `⚠️  CoT TCP feed error: ${e.message}`); });
+    sock.on('close', () => { retry(); });
+    this.tcpSocket = sock;
   }
 
   stop() {
+    this.stopped = true;
+    this.queue = [];
+    if (this.drainTimer) { clearInterval(this.drainTimer); this.drainTimer = null; }
+    if (this.tcpReconnectTimer) { clearTimeout(this.tcpReconnectTimer); this.tcpReconnectTimer = null; }
     if (this.socket) {
       try { this.socket.close(); } catch { /* ignore */ }
       this.socket = null;
     }
+    if (this.tcpSocket) {
+      try { this.tcpSocket.destroy(); } catch { /* ignore */ }
+      this.tcpSocket = null;
+      this.tcpConnected = false;
+    }
   }
 
-  /** Send a raw CoT XML datagram. */
+  /** Queue a CoT event for paced delivery (drops oldest if backed up). */
   send(xml) {
-    if (!this.socket) return;
-    const buf = Buffer.from(xml);
-    this.socket.send(buf, this.opts.multicastPort, this.opts.multicastAddr, (err) => {
-      if (err) this.log('warn', `⚠️  CoT send failed: ${err.message}`);
-    });
+    this.queue.push(xml);
+    if (this.queue.length > 1000) this.queue.splice(0, this.queue.length - 1000);
+  }
+
+  /** Emit one queued CoT event to all active outputs (multicast + TCP feed). */
+  drain() {
+    const xml = this.queue.shift();
+    if (!xml) return;
+    if (this.socket) {
+      const buf = Buffer.from(xml);
+      this.socket.send(buf, this.opts.multicastPort, this.opts.multicastAddr, (err) => {
+        if (err) this.log('warn', `⚠️  CoT multicast send failed: ${err.message}`);
+      });
+    }
+    if (this.tcpConnected && this.tcpSocket) {
+      try { this.tcpSocket.write(xml + '\n'); } catch (e) { this.log('warn', `⚠️  CoT TCP write failed: ${e.message}`); }
+    }
   }
 
   iso(date) { return date.toISOString(); }

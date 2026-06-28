@@ -220,6 +220,9 @@ class MeshtasticBridgeServer {
     this.cotPublishNodes = true;
     this.cotPublishAircraft = true;
     this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
+    this.cotMulticastEnabled = true;         // emit UDP multicast (LAN ATAK)
+    this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
+    this.cotTcpPort = 8087;                  // FreeTAKServer CoT streaming port
     this.cotService = null;                  // CotService instance
 
     // ===== PORT EXCLUSION CONFIGURATION =====
@@ -455,7 +458,10 @@ class MeshtasticBridgeServer {
           if (config.cot.publishNodes !== undefined) this.cotPublishNodes = config.cot.publishNodes;
           if (config.cot.publishAircraft !== undefined) this.cotPublishAircraft = config.cot.publishAircraft;
           if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
-          console.log(`📋 Loaded CoT/TAK config: ${this.cotEnabled ? 'ENABLED' : 'DISABLED'}`);
+          if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
+          if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
+          if (config.cot.tcpPort !== undefined) this.cotTcpPort = config.cot.tcpPort;
+          console.log(`📋 Loaded CoT/TAK config: ${this.cotEnabled ? 'ENABLED' : 'DISABLED'}${this.cotTcpHost ? ` (TCP feed → ${this.cotTcpHost}:${this.cotTcpPort})` : ''}`);
         }
 
         // Load Port Exclusion configuration
@@ -548,7 +554,10 @@ class MeshtasticBridgeServer {
           aircraftStaleSec: this.cotAircraftStaleSec,
           publishNodes: this.cotPublishNodes,
           publishAircraft: this.cotPublishAircraft,
-          teamColor: this.cotTeamColor
+          teamColor: this.cotTeamColor,
+          multicastEnabled: this.cotMulticastEnabled,
+          tcpHost: this.cotTcpHost,
+          tcpPort: this.cotTcpPort
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -5986,6 +5995,9 @@ class MeshtasticBridgeServer {
       publishNodes: this.cotPublishNodes,
       publishAircraft: this.cotPublishAircraft,
       teamColor: this.cotTeamColor,
+      multicastEnabled: this.cotMulticastEnabled,
+      tcpHost: this.cotTcpHost,
+      tcpPort: this.cotTcpPort,
     };
   }
 
@@ -6017,6 +6029,9 @@ class MeshtasticBridgeServer {
       if (config.publishNodes !== undefined) this.cotPublishNodes = config.publishNodes;
       if (config.publishAircraft !== undefined) this.cotPublishAircraft = config.publishAircraft;
       if (config.teamColor) this.cotTeamColor = config.teamColor;
+      if (config.multicastEnabled !== undefined) this.cotMulticastEnabled = config.multicastEnabled;
+      if (config.tcpHost !== undefined) this.cotTcpHost = config.tcpHost;
+      if (config.tcpPort !== undefined) this.cotTcpPort = config.tcpPort;
 
       this.saveConfig();
       this.startCotService();
