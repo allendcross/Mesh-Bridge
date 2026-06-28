@@ -1464,6 +1464,14 @@ class MeshtasticBridgeServer {
           await this.rebootRadio(ws, message.radioId);
           break;
 
+        case 'factory-reset':
+          await this.factoryResetRadio(ws, message.radioId, !!message.full);
+          break;
+
+        case 'reset-node-db':
+          await this.resetNodeDb(ws, message.radioId);
+          break;
+
         case 'sync-time':
           await this.syncRadioTime(ws, message.radioId);
           break;
@@ -4110,6 +4118,51 @@ class MeshtasticBridgeServer {
         type: 'error',
         error: `Reboot failed: ${error.message}`
       }));
+    }
+  }
+
+  /** Factory reset a radio (config-only by default, or full device wipe). */
+  async factoryResetRadio(ws, radioId, full = false) {
+    try {
+      const radio = this.radios.get(radioId);
+      if (!radio) {
+        ws.send(JSON.stringify({ type: 'error', error: `Radio ${radioId} not found` }));
+        return;
+      }
+      if (!radio.protocol || typeof radio.protocol.factoryReset !== 'function') {
+        throw new Error('Factory reset not supported for this radio type');
+      }
+      console.log(`🏭 Factory reset (${full ? 'FULL' : 'config'}) radio ${radioId}...`);
+      await radio.protocol.factoryReset(full);
+      ws.send(JSON.stringify({
+        type: 'factory-reset-success',
+        radioId,
+        full,
+        message: `Factory reset (${full ? 'full device' : 'config only'}) sent. Radio will restart.`
+      }));
+      this.broadcast({ type: 'radio-rebooting', radioId });
+    } catch (error) {
+      console.error('❌ Factory reset error:', error);
+      ws.send(JSON.stringify({ type: 'error', error: `Factory reset failed: ${error.message}` }));
+    }
+  }
+
+  /** Clear a radio's node database. */
+  async resetNodeDb(ws, radioId) {
+    try {
+      const radio = this.radios.get(radioId);
+      if (!radio) {
+        ws.send(JSON.stringify({ type: 'error', error: `Radio ${radioId} not found` }));
+        return;
+      }
+      if (!radio.protocol || typeof radio.protocol.resetNodeDb !== 'function') {
+        throw new Error('Node DB reset not supported for this radio type');
+      }
+      await radio.protocol.resetNodeDb();
+      ws.send(JSON.stringify({ type: 'node-db-reset-success', radioId, message: 'Node database cleared.' }));
+    } catch (error) {
+      console.error('❌ Node DB reset error:', error);
+      ws.send(JSON.stringify({ type: 'error', error: `Node DB reset failed: ${error.message}` }));
     }
   }
 

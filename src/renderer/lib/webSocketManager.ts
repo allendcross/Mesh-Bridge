@@ -916,6 +916,24 @@ export class WebSocketRadioManager {
     }));
   }
 
+  /** Factory reset a radio (config-only by default, or full device wipe). */
+  async factoryReset(radioId: string, full = false): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected to bridge server');
+    }
+    this.log('warn', `🏭 Factory reset (${full ? 'FULL' : 'config'}) radio ${radioId}...`);
+    this.ws.send(JSON.stringify({ type: 'factory-reset', radioId, full }));
+  }
+
+  /** Clear a radio's node database. */
+  async resetNodeDb(radioId: string): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected to bridge server');
+    }
+    this.log('info', `🗑️  Resetting node DB on radio ${radioId}...`);
+    this.ws.send(JSON.stringify({ type: 'reset-node-db', radioId }));
+  }
+
   /**
    * Sync radio device time with computer time
    */

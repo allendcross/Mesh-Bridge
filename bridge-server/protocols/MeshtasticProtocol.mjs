@@ -1216,6 +1216,36 @@ export class MeshtasticProtocol extends BaseProtocol {
    * Reboot the radio device
    * This will restart the Meshtastic radio
    */
+  /**
+   * Factory reset the radio.
+   * @param {boolean} full - true: full device reset (wipes keys/identity); false: config only
+   */
+  async factoryReset(full = false) {
+    if (!this.connected || !this.device) {
+      throw new Error('Device not connected');
+    }
+    console.log(`[Meshtastic] 🏭 Factory reset (${full ? 'FULL device' : 'config only'})...`);
+    if (full) {
+      await this.device.factoryResetDevice();
+    } else {
+      await this.device.factoryResetConfig();
+    }
+    console.log(`[Meshtastic] ✅ Factory reset command sent`);
+    this.connected = false; // device reboots after reset
+    return true;
+  }
+
+  /** Clear the radio's node database (forgets all heard nodes). */
+  async resetNodeDb() {
+    if (!this.connected || !this.device) {
+      throw new Error('Device not connected');
+    }
+    console.log(`[Meshtastic] 🗑️  Resetting node database...`);
+    await this.device.resetNodes();
+    console.log(`[Meshtastic] ✅ Node DB reset command sent`);
+    return true;
+  }
+
   async rebootRadio() {
     try {
       if (!this.connected || !this.device) {

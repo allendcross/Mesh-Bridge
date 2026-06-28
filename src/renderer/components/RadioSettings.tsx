@@ -821,6 +821,48 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
     onSetConfig(radioId, configType, config);
   };
 
+  // Export the currently-loaded radio settings + channels as a JSON backup file.
+  const handleExportConfig = () => {
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      radioId,
+      radioName: radio?.nodeInfo?.longName || radio?.name || radioId,
+      configs: {
+        lora: loraConfig,
+        device: deviceConfig,
+        position: positionConfig,
+        power: powerConfig,
+        network: networkConfig,
+        display: displayConfig,
+        bluetooth: bluetoothConfig,
+        user: userConfig,
+        security: { adminKey: securityConfig.adminKey, isManaged: securityConfig.isManaged, adminChannelEnabled: securityConfig.adminChannelEnabled },
+      },
+      channels: radio?.channels || [],
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `meshbridge-config-${backup.radioName}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFactoryReset = (full: boolean) => {
+    if (!radioId) return;
+    const label = full ? 'FULL device reset (wipes config, keys, and identity)' : 'config reset (settings back to defaults)';
+    if (!confirm(`⚠️ Factory ${full ? 'FULL ' : ''}reset this radio?\n\n${label}.\nThe radio will reboot. This cannot be undone.`)) return;
+    if (full && !confirm('This FULL reset also wipes the device identity/keys. Are you absolutely sure?')) return;
+    manager.factoryReset(radioId, full);
+  };
+
+  const handleResetNodeDb = () => {
+    if (!radioId) return;
+    if (!confirm('Clear this radio\'s node database (forget all heard nodes)?')) return;
+    manager.resetNodeDb(radioId);
+  };
+
   if (!radioId) {
     return (
       <div className="card p-8 text-center">
@@ -2099,6 +2141,35 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Maintenance / Danger Zone */}
+      <div className="card p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-2xl">🧰</span>
+          <div>
+            <h3 className="text-lg font-bold text-white">Maintenance</h3>
+            <p className="text-sm text-slate-400">Backup, node database, and factory reset</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleExportConfig} className="btn-secondary text-sm">
+            💾 Export Config (JSON)
+          </button>
+          <button onClick={handleResetNodeDb} className="text-sm py-2 px-3 rounded-lg bg-slate-700 text-white hover:bg-slate-600">
+            🗑️ Reset Node DB
+          </button>
+          <button onClick={() => handleFactoryReset(false)} className="text-sm py-2 px-3 rounded-lg bg-orange-600/80 text-white hover:bg-orange-600">
+            🏭 Factory Reset (Config)
+          </button>
+          <button onClick={() => handleFactoryReset(true)} className="text-sm py-2 px-3 rounded-lg bg-red-600/80 text-white hover:bg-red-600">
+            ☢️ Factory Reset (Full Wipe)
+          </button>
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          Export saves the currently-loaded settings + channels. Factory reset reboots the radio; the full wipe also
+          clears identity/keys. (Config import and full per-module configuration are planned.)
+        </p>
       </div>
 
       {/* Warning */}
