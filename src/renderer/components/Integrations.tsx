@@ -5,8 +5,9 @@ import OllamaInstaller from './OllamaInstaller';
 import CommunicationSettings from './CommunicationSettings';
 import MQTTSettings from './MQTTSettings';
 import AdvertisementBotSettings from './AdvertisementBotSettings';
+import AdsbSettings from './AdsbSettings';
 
-type IntegrationTab = 'ai' | 'ollama' | 'communication' | 'mqtt' | 'adbot';
+type IntegrationTab = 'ai' | 'ollama' | 'communication' | 'mqtt' | 'adbot' | 'adsb';
 
 export default function Integrations() {
   const [activeTab, setActiveTab] = useState<IntegrationTab>('ai');
@@ -16,6 +17,7 @@ export default function Integrations() {
     { id: 'ollama', label: 'Ollama Installer', icon: '🦙' },
     { id: 'communication', label: 'Email & Discord', icon: '📧' },
     { id: 'mqtt', label: 'MQTT', icon: '📡' },
+    { id: 'adsb', label: 'ADS-B', icon: '✈️' },
     { id: 'adbot', label: 'Advertisement Bot', icon: '📢' },
   ];
 
@@ -54,6 +56,7 @@ export default function Integrations() {
         {activeTab === 'ollama' && <OllamaInstaller />}
         {activeTab === 'communication' && <CommunicationSettings />}
         {activeTab === 'mqtt' && <MQTTSettings />}
+        {activeTab === 'adsb' && <AdsbSettings />}
         {activeTab === 'adbot' && <AdvertisementBotSettings />}
       </div>
     </div>

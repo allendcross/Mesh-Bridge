@@ -460,6 +460,11 @@ export class WebSocketRadioManager {
         });
         break;
 
+      case 'adsb-config':
+      case 'adsb-config-changed':
+        this.emit('adsb-config', data.config);
+        break;
+
       case 'aircraft-update':
         // ADS-B aircraft snapshot from the bridge. Ephemeral + high-volume:
         // emit straight through, snapshot-replace in the store, NEVER persist.
@@ -769,6 +774,20 @@ export class WebSocketRadioManager {
   setCotConfig(config: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'set-cot-config', config }));
+    }
+  }
+
+  /** Ask the bridge for the current ADS-B feed config. */
+  requestAdsbConfig() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-adsb-config' }));
+    }
+  }
+
+  /** Update the ADS-B feed config. */
+  setAdsbConfig(config: any) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set-adsb-config', config }));
     }
   }
 

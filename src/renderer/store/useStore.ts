@@ -17,6 +17,7 @@ interface AppStore {
   aircraft: Aircraft[]; // ADS-B aircraft (ephemeral, snapshot-replaced, NOT persisted)
   stationLocation: StationLocation | null; // server/relay location for map auto-center
   cotConfig: any | null; // CoT/TAK output config
+  adsbConfig: any | null; // ADS-B feed config
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
 
@@ -89,6 +90,10 @@ interface AppStore {
   getAdBotConfig: () => Promise<void>;
   setAdBotConfig: (config: AdvertisementBotConfig) => Promise<void>;
   testAdBot: () => Promise<void>;
+
+  // ADS-B Actions
+  getAdsbConfig: () => void;
+  setAdsbConfig: (config: any) => void;
 }
 
 export const useStore = create<AppStore>((set, get) => {
@@ -238,6 +243,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ cotConfig: config });
   });
 
+  // ADS-B feed config
+  manager.on('adsb-config', (config: any) => {
+    set({ adsbConfig: config });
+  });
+
   manager.on('bridge-disconnected', () => {
     set({ bridgeConnected: false });
   });
@@ -289,6 +299,7 @@ export const useStore = create<AppStore>((set, get) => {
     aircraft: [],
     stationLocation: null,
     cotConfig: null,
+    adsbConfig: null,
     bridgeConfig: null,
     telemetryHistory: new Map(),
     autoScanEnabled: false,
@@ -578,6 +589,15 @@ export const useStore = create<AppStore>((set, get) => {
 
     testAdBot: async () => {
       await manager.testAdBot();
+    },
+
+    // ADS-B Actions
+    getAdsbConfig: () => {
+      manager.requestAdsbConfig();
+    },
+
+    setAdsbConfig: (config: any) => {
+      manager.setAdsbConfig(config);
     },
   };
 });
