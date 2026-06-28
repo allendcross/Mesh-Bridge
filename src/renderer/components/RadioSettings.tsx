@@ -126,6 +126,7 @@ interface UserConfig {
 interface SecurityConfig {
   publicKey: string;
   privateKey: string;
+  hasPrivateKey?: boolean;
   adminKey: string[];
   isManaged: boolean;
   serialEnabled: boolean;
@@ -392,6 +393,39 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
     debugLogEnabled: false,
     adminChannelEnabled: true,
   });
+  const [newAdminKey, setNewAdminKey] = useState('');
+
+  // Validate that a base64 string decodes to a 32-byte Curve25519 public key.
+  const isValidAdminKey = (b64: string): boolean => {
+    try {
+      const bin = atob(b64.trim());
+      return bin.length === 32;
+    } catch {
+      return false;
+    }
+  };
+
+  const addAdminKey = () => {
+    const key = newAdminKey.trim();
+    if (!isValidAdminKey(key)) {
+      alert('Admin key must be a base64-encoded 32-byte public key (e.g. the public key of an admin device).');
+      return;
+    }
+    if (securityConfig.adminKey.includes(key)) {
+      alert('That admin key is already in the list.');
+      return;
+    }
+    if (securityConfig.adminKey.length >= 3) {
+      alert('Meshtastic supports up to 3 admin keys.');
+      return;
+    }
+    setSecurityConfig(prev => ({ ...prev, adminKey: [...prev.adminKey, key] }));
+    setNewAdminKey('');
+  };
+
+  const removeAdminKey = (key: string) => {
+    setSecurityConfig(prev => ({ ...prev, adminKey: prev.adminKey.filter(k => k !== key) }));
+  };
 
   // Module Configs
   const [mqttModuleConfig, setMqttModuleConfig] = useState<MQTTConfig>({
@@ -527,7 +561,6 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
 
   // Suppress unused variable warnings - these will be used when UI components are added
   void userConfig; void setUserConfig;
-  void securityConfig; void setSecurityConfig;
   void mqttModuleConfig; void setMqttModuleConfig;
   void serialModuleConfig; void setSerialModuleConfig;
   void telemetryModuleConfig; void setTelemetryModuleConfig;
@@ -582,6 +615,18 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
           break;
         case 'bluetooth':
           setBluetoothConfig(prev => ({ ...prev, ...config }));
+          break;
+        case 'security':
+          setSecurityConfig(prev => ({
+            ...prev,
+            publicKey: config.publicKey ?? prev.publicKey,
+            hasPrivateKey: config.hasPrivateKey ?? prev.hasPrivateKey,
+            adminKey: Array.isArray(config.adminKey) ? config.adminKey : prev.adminKey,
+            isManaged: config.isManaged ?? prev.isManaged,
+            serialEnabled: config.serialEnabled ?? prev.serialEnabled,
+            debugLogEnabled: config.debugLogApiEnabled ?? prev.debugLogEnabled,
+            adminChannelEnabled: config.adminChannelEnabled ?? prev.adminChannelEnabled,
+          }));
           break;
       }
     };
@@ -716,14 +761,26 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
       return;
     }
 
-    // Special handling for security - merge into device config
+    // Security config: send a real SecurityConfig (admin keys + flags). The bridge
+    // preserves the device's identity keys; we still guard the lockout-risky bits.
     if (configType === 'security') {
-      const mergedConfig = {
-        ...deviceConfig,
+      if (securityConfig.isManaged || securityConfig.adminKey.length > 0) {
+        const ok = confirm(
+          '⚠️ LOCKOUT RISK\n\n' +
+          'Admin keys and Managed mode control who can administer this device. ' +
+          'A wrong or missing admin key with Managed mode ON can permanently lock you out ' +
+          'and require a PHYSICAL factory reset of the radio.\n\n' +
+          'Apply these security settings?'
+        );
+        if (!ok) return;
+      }
+      onSetConfig(radioId, 'security', {
+        adminKey: securityConfig.adminKey,
+        isManaged: securityConfig.isManaged,
         serialEnabled: securityConfig.serialEnabled,
-        debugLogEnabled: securityConfig.debugLogEnabled,
-      };
-      onSetConfig(radioId, 'device', mergedConfig);
+        debugLogApiEnabled: securityConfig.debugLogEnabled,
+        adminChannelEnabled: securityConfig.adminChannelEnabled,
+      });
       return;
     }
 
@@ -1852,9 +1909,63 @@ function RadioSettings({ radioId, radio, onGetConfig, onSetConfig }: RadioSettin
               </label>
             </div>
 
-            <div className="text-sm text-slate-500 mt-2">
-              <p><strong>Note:</strong> Public/Private key management and admin keys are advanced features.</p>
-              <p>Use Meshtastic mobile app for full security configuration.</p>
+            {/* Device public key */}
+            <div className="mt-2">
+              <label className="block text-sm font-medium text-slate-300 mb-1">This Device's Public Key</label>
+              <div className="bg-slate-900 p-2 rounded font-mono text-xs text-slate-300 break-all min-h-[2rem]">
+                {securityConfig.publicKey || <span className="text-slate-600">Press “Get” to load…</span>}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Share this with other operators so they can authorize this device as an admin.
+                {securityConfig.hasPrivateKey === false && ' ⚠️ No private key set on this device.'}
+              </p>
+            </div>
+
+            {/* Admin keys */}
+            <div className="mt-2">
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Admin Keys ({securityConfig.adminKey.length}/3)
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                Public keys authorized to remotely administer this device. Add the public key of your admin device.
+              </p>
+              <div className="space-y-2 mb-2">
+                {securityConfig.adminKey.length === 0 && (
+                  <div className="text-xs text-slate-600">No admin keys configured.</div>
+                )}
+                {securityConfig.adminKey.map((key) => (
+                  <div key={key} className="flex items-center gap-2 bg-slate-900 p-2 rounded">
+                    <span className="flex-1 font-mono text-xs text-slate-300 break-all">{key}</span>
+                    <button
+                      onClick={() => removeAdminKey(key)}
+                      className="text-xs text-red-400 hover:text-red-300 flex-shrink-0"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newAdminKey}
+                  onChange={(e) => setNewAdminKey(e.target.value)}
+                  placeholder="Paste base64 admin public key (32 bytes)…"
+                  className="input flex-1 text-xs font-mono"
+                />
+                <button onClick={addAdminKey} className="btn-secondary text-sm whitespace-nowrap">
+                  ➕ Add Key
+                </button>
+              </div>
+            </div>
+
+            <div className="card p-3 bg-red-500/10 border border-red-500/30 mt-2">
+              <p className="text-xs text-red-300">
+                <strong>Lockout warning:</strong> Enabling <em>Managed Mode</em> means only holders of an admin key
+                can change this device's settings. If you enable it without a working admin key (and lose serial/BLE
+                access), you may need a <strong>physical factory reset</strong>. Identity (public/private) keys are
+                preserved by the bridge and never wiped here.
+              </p>
             </div>
           </div>
         </div>

@@ -747,6 +747,25 @@ export class MeshtasticProtocol extends BaseProtocol {
             this.emit('config', { configType: 'bluetooth', config: configData });
             break;
 
+          case 'security': {
+            // Cache the FULL security config (incl. public/private identity keys) so a
+            // later setConfig can preserve them — never expose privateKey to clients.
+            this.securityConfig = configData;
+            const b64 = (u8) => (u8 && u8.length ? Buffer.from(u8).toString('base64') : '');
+            const sanitized = {
+              publicKey: b64(configData.publicKey),
+              hasPrivateKey: !!(configData.privateKey && configData.privateKey.length),
+              adminKey: (configData.adminKey || []).map(b64).filter(Boolean),
+              isManaged: !!configData.isManaged,
+              serialEnabled: !!configData.serialEnabled,
+              debugLogApiEnabled: !!configData.debugLogApiEnabled,
+              adminChannelEnabled: !!configData.adminChannelEnabled,
+            };
+            console.log(`[Meshtastic] Security config received: ${sanitized.adminKey.length} admin key(s), managed=${sanitized.isManaged}`);
+            this.emit('config', { configType: 'security', config: sanitized });
+            break;
+          }
+
           default:
             console.warn(`[Meshtastic] ⚠️  Unknown config type: ${configType}`);
         }
@@ -1242,10 +1261,11 @@ export class MeshtasticProtocol extends BaseProtocol {
         'display': Protobuf.Admin.AdminMessage_ConfigType.DISPLAY_CONFIG,
         'lora': Protobuf.Admin.AdminMessage_ConfigType.LORA_CONFIG,
         'bluetooth': Protobuf.Admin.AdminMessage_ConfigType.BLUETOOTH_CONFIG,
+        'security': Protobuf.Admin.AdminMessage_ConfigType.SECURITY_CONFIG,
       };
 
       const configTypeEnum = configTypeMap[configType.toLowerCase()];
-      if (!configTypeEnum) {
+      if (configTypeEnum === undefined) {
         throw new Error(`Unknown config type: ${configType}`);
       }
 
@@ -1282,6 +1302,39 @@ export class MeshtasticProtocol extends BaseProtocol {
       // Create config message based on type
       let configMessage;
       let configCase;
+
+      // SECURITY is special: we MUST preserve the device's existing public/private
+      // identity keys (wiping them can permanently lock you out). Merge the incoming
+      // admin-key/flag changes onto the last-fetched full security config.
+      if (configType.toLowerCase() === 'security') {
+        if (!this.securityConfig) {
+          throw new Error('Refusing to set security config before it has been fetched (would risk wiping identity keys). Get the security config first.');
+        }
+        const b64ToBytes = (s) => new Uint8Array(Buffer.from(s, 'base64'));
+        const merged = {
+          // Preserve identity keys from the cached full config
+          publicKey: this.securityConfig.publicKey || new Uint8Array(0),
+          privateKey: this.securityConfig.privateKey || new Uint8Array(0),
+          // Apply incoming admin keys (array of base64) if provided, else keep existing
+          adminKey: Array.isArray(config.adminKey)
+            ? config.adminKey.filter(Boolean).map(b64ToBytes)
+            : (this.securityConfig.adminKey || []),
+          isManaged: config.isManaged !== undefined ? config.isManaged : !!this.securityConfig.isManaged,
+          serialEnabled: config.serialEnabled !== undefined ? config.serialEnabled : !!this.securityConfig.serialEnabled,
+          debugLogApiEnabled: config.debugLogApiEnabled !== undefined ? config.debugLogApiEnabled : !!this.securityConfig.debugLogApiEnabled,
+          adminChannelEnabled: config.adminChannelEnabled !== undefined ? config.adminChannelEnabled : !!this.securityConfig.adminChannelEnabled,
+        };
+        console.log(`[Radio Config] 🔐 Security: ${merged.adminKey.length} admin key(s), managed=${merged.isManaged} (identity keys preserved)`);
+        configMessage = create(Protobuf.Config.Config_SecurityConfigSchema, merged);
+        const fullSecurity = create(Protobuf.Config.ConfigSchema, {
+          payloadVariant: { case: 'security', value: configMessage }
+        });
+        await this.device.setConfig(fullSecurity);
+        // Refresh our cache to reflect the new state
+        this.securityConfig = merged;
+        console.log(`[Radio Config] ✅ Security configuration sent successfully`);
+        return true;
+      }
 
       switch (configType.toLowerCase()) {
         case 'device':
