@@ -126,6 +126,25 @@ export interface MeshNode {
   fromRadio: string; // Which radio saw this node
 }
 
+// ADS-B aircraft contact (normalized from dump1090 / airplanes.live by the bridge).
+// Field names are chosen to map cleanly to CoT for future TAK export.
+export interface Aircraft {
+  icao: string;            // ICAO24 hex address (unique id)
+  callsign?: string;       // flight / call sign (trimmed)
+  lat: number;
+  lon: number;
+  altFt?: number;          // barometric altitude, feet
+  track?: number;          // heading, degrees (0-359) — used for marker rotation
+  groundSpeedKt?: number;  // ground speed, knots
+  verticalRateFpm?: number;
+  squawk?: string;         // Mode A squawk code
+  category?: string;       // emitter category (A1=light .. A7)
+  rssi?: number;           // signal (local receiver only), dBFS
+  seenPos?: number;        // seconds since last position — drives fade/expiry
+  seen?: number;           // seconds since last message of any kind
+  emergency?: boolean;     // squawk is 7500/7600/7700
+}
+
 export interface TelemetrySnapshot {
   timestamp: Date;
   nodeId: string;

@@ -435,6 +435,17 @@ export class WebSocketRadioManager {
         }
         break;
 
+      case 'aircraft-update':
+        // ADS-B aircraft snapshot from the bridge. Ephemeral + high-volume:
+        // emit straight through, snapshot-replace in the store, NEVER persist.
+        this.emit('aircraft-update', {
+          aircraft: Array.isArray(data.aircraft) ? data.aircraft : [],
+          staleSeconds: data.staleSeconds,
+          source: data.source,
+          error: data.error,
+        });
+        break;
+
       case 'message':
         // New message received (or sent by us)
         console.log('[DEBUG] Raw message data from backend:', {

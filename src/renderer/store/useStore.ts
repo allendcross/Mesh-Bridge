@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { WebSocketRadioManager } from '../lib/webSocketManager';
-import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot } from '../types';
+import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot, Aircraft } from '../types';
 
 interface AppStore {
   // Manager instance
@@ -14,6 +14,7 @@ interface AppStore {
   consoleLines: Array<{ timestamp: string; level: string; message: string }>; // Raw console output
   messages: Message[];
   nodes: MeshNode[];
+  aircraft: Aircraft[]; // ADS-B aircraft (ephemeral, snapshot-replaced, NOT persisted)
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
 
@@ -220,6 +221,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ logs });
   });
 
+  // ADS-B aircraft: snapshot-replace each tick (ephemeral, never persisted)
+  manager.on('aircraft-update', ({ aircraft }: { aircraft: Aircraft[] }) => {
+    set({ aircraft });
+  });
+
   manager.on('bridge-disconnected', () => {
     set({ bridgeConnected: false });
   });
@@ -268,6 +274,7 @@ export const useStore = create<AppStore>((set, get) => {
     consoleLines: [],
     messages: [],
     nodes: [],
+    aircraft: [],
     bridgeConfig: null,
     telemetryHistory: new Map(),
     autoScanEnabled: false,

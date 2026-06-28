@@ -28,6 +28,7 @@ import nodemailer from 'nodemailer';
 import mqtt from 'mqtt';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
+import { AdsbService } from './services/AdsbService.mjs';
 import fetch from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
@@ -183,6 +184,21 @@ class MeshtasticBridgeServer {
     this.adBotLastSent = new Map();            // Track last send time per radio
     this.adBotTimer = null;                    // Interval timer reference
     this.adBotMessageIndex = 0;                // Current message index for rotation
+
+    // ===== ADS-B (AIRCRAFT TRACKING) CONFIGURATION =====
+    // Poll an ADS-B feed (local dump1090 / FlightRadar24 image, or airplanes.live)
+    // and broadcast aircraft to the Tactical map. Aircraft are ephemeral: only
+    // positioned contacts fresher than adsbStaleSeconds are shown.
+    this.adsbEnabled = true;                                          // Enable/disable ADS-B polling
+    this.adsbSource = 'dump1090';                                     // 'dump1090' | 'network'
+    this.adsbUrl = 'http://192.168.0.27/dump1090/data/aircraft.json'; // dump1090 aircraft.json URL
+    this.adsbLat = null;                                              // station lat (network source / geofence)
+    this.adsbLon = null;                                              // station lon (network source / geofence)
+    this.adsbRadiusNm = 100;                                          // network source search radius (nm)
+    this.adsbPollIntervalMs = 2000;                                   // poll cadence
+    this.adsbStaleSeconds = 15;                                       // drop positions older than this
+    this.adsbMaxAircraft = 500;                                       // safety cap
+    this.adsbService = null;                                          // AdsbService instance
 
     // ===== PORT EXCLUSION CONFIGURATION =====
     // Ports to exclude from bridge usage (persists across reboots)
@@ -385,6 +401,20 @@ class MeshtasticBridgeServer {
           console.log(`📋 Loaded Advertisement Bot config: ${this.adBotEnabled ? 'ENABLED' : 'DISABLED'}`);
         }
 
+        // Load ADS-B configuration
+        if (config.adsb) {
+          if (config.adsb.enabled !== undefined) this.adsbEnabled = config.adsb.enabled;
+          if (config.adsb.source) this.adsbSource = config.adsb.source;
+          if (config.adsb.url) this.adsbUrl = config.adsb.url;
+          if (config.adsb.lat !== undefined) this.adsbLat = config.adsb.lat;
+          if (config.adsb.lon !== undefined) this.adsbLon = config.adsb.lon;
+          if (config.adsb.radiusNm !== undefined) this.adsbRadiusNm = config.adsb.radiusNm;
+          if (config.adsb.pollIntervalMs !== undefined) this.adsbPollIntervalMs = config.adsb.pollIntervalMs;
+          if (config.adsb.staleSeconds !== undefined) this.adsbStaleSeconds = config.adsb.staleSeconds;
+          if (config.adsb.maxAircraft !== undefined) this.adsbMaxAircraft = config.adsb.maxAircraft;
+          console.log(`📋 Loaded ADS-B config: ${this.adsbEnabled ? 'ENABLED' : 'DISABLED'} (source: ${this.adsbSource})`);
+        }
+
         // Load Port Exclusion configuration
         if (Array.isArray(config.excludedPorts)) {
           this.excludedPorts = config.excludedPorts;
@@ -449,6 +479,17 @@ class MeshtasticBridgeServer {
           messages: this.adBotMessages,
           targetRadios: this.adBotTargetRadios,
           channel: this.adBotChannel
+        },
+        adsb: {
+          enabled: this.adsbEnabled,
+          source: this.adsbSource,
+          url: this.adsbUrl,
+          lat: this.adsbLat,
+          lon: this.adsbLon,
+          radiusNm: this.adsbRadiusNm,
+          pollIntervalMs: this.adsbPollIntervalMs,
+          staleSeconds: this.adsbStaleSeconds,
+          maxAircraft: this.adsbMaxAircraft
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -1179,6 +1220,9 @@ class MeshtasticBridgeServer {
       console.log('📻 Ready to connect radios...');
       console.log('');
 
+      // Start ADS-B aircraft polling (if enabled)
+      this.startAdsbService();
+
       // Connect to MQTT if enabled
       if (this.mqttEnabled && this.mqttBrokerUrl) {
         this.connectMQTT();
@@ -1312,6 +1356,14 @@ class MeshtasticBridgeServer {
 
         case 'scan-bluetooth':
           await this.scanBluetoothDevices(ws, message.scanDuration || 10000);
+          break;
+
+        case 'get-adsb-config':
+          this.sendAdsbConfig(ws);
+          break;
+
+        case 'set-adsb-config':
+          await this.adsbSetConfig(ws, message.config || {});
           break;
 
         case 'connect':
@@ -5704,6 +5756,72 @@ class MeshtasticBridgeServer {
     }
   }
 
+  // ===== ADS-B (AIRCRAFT TRACKING) =====
+
+  /** Build the current ADS-B options object from instance config. */
+  adsbOptions() {
+    return {
+      enabled: this.adsbEnabled,
+      source: this.adsbSource,
+      url: this.adsbUrl,
+      lat: this.adsbLat,
+      lon: this.adsbLon,
+      radiusNm: this.adsbRadiusNm,
+      pollIntervalMs: this.adsbPollIntervalMs,
+      staleSeconds: this.adsbStaleSeconds,
+      maxAircraft: this.adsbMaxAircraft,
+    };
+  }
+
+  /** (Re)start the ADS-B poller using current config. */
+  startAdsbService() {
+    this.stopAdsbService();
+    this.adsbService = new AdsbService(
+      this.adsbOptions(),
+      (payload) => this.broadcast(payload),
+      (level, msg) => console.log(msg)
+    );
+    this.adsbService.start();
+  }
+
+  /** Stop the ADS-B poller. */
+  stopAdsbService() {
+    if (this.adsbService) {
+      this.adsbService.stop();
+      this.adsbService = null;
+    }
+  }
+
+  /** Send current ADS-B config to a client. */
+  sendAdsbConfig(ws) {
+    ws.send(JSON.stringify({ type: 'adsb-config', config: this.adsbOptions() }));
+  }
+
+  /** Update ADS-B config from a client, persist, and restart the poller. */
+  async adsbSetConfig(ws, config) {
+    try {
+      if (config.enabled !== undefined) this.adsbEnabled = config.enabled;
+      if (config.source) this.adsbSource = config.source;
+      if (config.url !== undefined) this.adsbUrl = config.url;
+      if (config.lat !== undefined) this.adsbLat = config.lat;
+      if (config.lon !== undefined) this.adsbLon = config.lon;
+      if (config.radiusNm !== undefined) this.adsbRadiusNm = config.radiusNm;
+      if (config.pollIntervalMs !== undefined) this.adsbPollIntervalMs = config.pollIntervalMs;
+      if (config.staleSeconds !== undefined) this.adsbStaleSeconds = config.staleSeconds;
+      if (config.maxAircraft !== undefined) this.adsbMaxAircraft = config.maxAircraft;
+
+      this.saveConfig();
+      this.startAdsbService();
+
+      console.log(`✅ ADS-B configuration updated (enabled: ${this.adsbEnabled}, source: ${this.adsbSource})`);
+      ws.send(JSON.stringify({ type: 'adsb-config-updated', success: true }));
+      this.broadcast({ type: 'adsb-config-changed', config: this.adsbOptions() });
+    } catch (error) {
+      console.error('❌ Error setting ADS-B config:', error);
+      ws.send(JSON.stringify({ type: 'adsb-config-updated', success: false, error: error.message }));
+    }
+  }
+
   /**
    * Broadcast message to all connected WebSocket clients
    */
@@ -5728,6 +5846,9 @@ class MeshtasticBridgeServer {
 
     // Stop advertisement bot
     this.stopAdvertisementBot();
+
+    // Stop ADS-B poller
+    this.stopAdsbService();
 
     // Disconnect all radios
     for (const [radioId, radio] of this.radios.entries()) {

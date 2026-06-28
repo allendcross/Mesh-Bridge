@@ -1,13 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MeshNode, Radio } from '../types';
+import { MeshNode, Radio, Aircraft } from '../types';
 
 interface TacticalViewProps {
   nodes: MeshNode[];
   radios: Radio[];
+  aircraft?: Aircraft[];
 }
+
+// ADS-B display tuning: drop positions older than STALE, fade them from FADE_START.
+const AIRCRAFT_STALE_SEC = 15;
+const AIRCRAFT_FADE_START_SEC = 10;
 
 interface GPSTrack {
   nodeId: string;
@@ -42,8 +47,25 @@ function AutoFitBounds({ nodes }: { nodes: MeshNode[] }) {
   return null;
 }
 
-export default function TacticalView({ nodes, radios }: TacticalViewProps) {
+// One-shot fit to aircraft when there are no positioned nodes to anchor the map.
+// Fits only once (per mount) so the view doesn't jump on every 2s aircraft refresh.
+function AircraftInitialFit({ aircraft, hasPositionedNodes }: { aircraft: Aircraft[]; hasPositionedNodes: boolean }) {
+  const map = useMap();
+  const fitted = useRef(false);
+
+  useEffect(() => {
+    if (fitted.current || hasPositionedNodes || aircraft.length === 0) return;
+    const bounds = L.latLngBounds(aircraft.map(a => [a.lat, a.lon]));
+    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 11 });
+    fitted.current = true;
+  }, [aircraft, hasPositionedNodes, map]);
+
+  return null;
+}
+
+export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalViewProps) {
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
+  const [showAircraft, setShowAircraft] = useState(true);
   const [showBreadcrumbs, setShowBreadcrumbs] = useState(true);
   const [breadcrumbAge, setBreadcrumbAge] = useState(60); // minutes
   const [gpsTrails, setGpsTrails] = useState<Map<string, GPSTrack>>(new Map());
@@ -184,10 +206,61 @@ All devices must use the EXACT same PSK and channel index.`;
     });
   };
 
+  // Opacity ramp: fully opaque until FADE_START, fading to ~0.35 at STALE.
+  const aircraftOpacity = (seenPos: number): number => {
+    if (seenPos <= AIRCRAFT_FADE_START_SEC) return 1;
+    const t = (seenPos - AIRCRAFT_FADE_START_SEC) / (AIRCRAFT_STALE_SEC - AIRCRAFT_FADE_START_SEC);
+    return Math.max(0.35, 1 - t * 0.65);
+  };
+
+  // Rotated plane marker, colored cyan (red if emergency squawk), faded by position age.
+  const createAircraftIcon = (ac: Aircraft) => {
+    const color = ac.emergency ? '#ef4444' : '#22d3ee';
+    const opacity = aircraftOpacity(ac.seenPos ?? 0);
+    const rotation = ac.track ?? 0;
+    const label = ac.callsign || ac.icao.toUpperCase();
+    const altText = ac.altFt !== undefined ? `${Math.round(ac.altFt).toLocaleString()}ft` : '';
+
+    return L.divIcon({
+      html: `
+        <div style="position: relative; text-align: center; opacity: ${opacity};">
+          <svg width="26" height="26" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
+               style="transform: rotate(${rotation}deg); filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));">
+            <path d="M12 2 L13.5 11 L21 15 L21 16.5 L13.5 14.5 L13.5 19.5 L16 21 L16 22 L12 21 L8 22 L8 21 L10.5 19.5 L10.5 14.5 L3 16.5 L3 15 L10.5 11 Z"
+                  fill="${color}" stroke="#0f172a" stroke-width="0.7"/>
+          </svg>
+          <div style="
+            position: absolute;
+            top: 22px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15,23,42,0.85);
+            color: ${color};
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            white-space: nowrap;
+            line-height: 1.1;
+          ">${label}${altText ? `<br/><span style="color:#cbd5e1;font-weight:500;">${altText}</span>` : ''}</div>
+        </div>
+      `,
+      className: '',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    });
+  };
+
   const nodesWithPosition = nodes.filter(n => n.position);
+  // Only show fresh, positioned aircraft (server already filters; this guards the UI too).
+  const visibleAircraft = aircraft.filter(
+    a => typeof a.lat === 'number' && typeof a.lon === 'number' && (a.seenPos ?? 0) <= AIRCRAFT_STALE_SEC
+  );
   const defaultCenter: [number, number] = nodesWithPosition.length > 0
     ? [nodesWithPosition[0].position!.latitude, nodesWithPosition[0].position!.longitude]
-    : [40.7128, -74.0060];
+    : visibleAircraft.length > 0
+      ? [visibleAircraft[0].lat, visibleAircraft[0].lon]
+      : [40.7128, -74.0060];
 
   return (
     <div className="space-y-6">
@@ -375,6 +448,20 @@ All devices must use the EXACT same PSK and channel index.`;
           </div>
 
           <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="aircraft"
+              checked={showAircraft}
+              onChange={(e) => setShowAircraft(e.target.checked)}
+              className="w-4 h-4 text-cyan-500 bg-slate-700 border-slate-600 rounded focus:ring-cyan-500"
+            />
+            <label htmlFor="aircraft" className="text-sm text-slate-300">
+              ✈️ Aircraft (ADS-B)
+              <span className="ml-1 text-cyan-400 font-semibold">{visibleAircraft.length}</span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-2">
             <label className="text-sm text-slate-300">Trail Age:</label>
             <select
               value={breadcrumbAge}
@@ -423,6 +510,7 @@ All devices must use the EXACT same PSK and channel index.`;
           zoomControl={true}
         >
           <AutoFitBounds nodes={nodesWithPosition} />
+          <AircraftInitialFit aircraft={visibleAircraft} hasPositionedNodes={nodesWithPosition.length > 0} />
 
           {mapLayer === 'osm' && (
             <TileLayer
@@ -495,6 +583,49 @@ All devices must use the EXACT same PSK and channel index.`;
                     )}
                     {node.temperature !== undefined && (
                       <div><strong>Temperature:</strong> {node.temperature.toFixed(1)}°C / {((node.temperature * 9/5) + 32).toFixed(1)}°F</div>
+                    )}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+          {/* ADS-B Aircraft */}
+          {showAircraft && visibleAircraft.map(ac => (
+            <Marker
+              key={ac.icao}
+              position={[ac.lat, ac.lon]}
+              icon={createAircraftIcon(ac)}
+            >
+              <Popup>
+                <div className="min-w-[200px]">
+                  <h3 className="font-bold text-lg mb-2">
+                    {ac.callsign || ac.icao.toUpperCase()}
+                    {ac.emergency && <span className="ml-2 text-red-600 text-sm">⚠ EMERGENCY</span>}
+                  </h3>
+                  <div className="text-sm space-y-1">
+                    <div><strong>ICAO:</strong> {ac.icao.toUpperCase()}</div>
+                    {ac.altFt !== undefined && (
+                      <div><strong>Altitude:</strong> {Math.round(ac.altFt).toLocaleString()} ft</div>
+                    )}
+                    {ac.groundSpeedKt !== undefined && (
+                      <div><strong>Ground Speed:</strong> {Math.round(ac.groundSpeedKt)} kt</div>
+                    )}
+                    {ac.track !== undefined && (
+                      <div><strong>Heading:</strong> {Math.round(ac.track)}°</div>
+                    )}
+                    {ac.verticalRateFpm !== undefined && ac.verticalRateFpm !== 0 && (
+                      <div><strong>Vertical Rate:</strong> {ac.verticalRateFpm > 0 ? '↑' : '↓'} {Math.abs(ac.verticalRateFpm).toLocaleString()} ft/min</div>
+                    )}
+                    {ac.squawk && (
+                      <div><strong>Squawk:</strong> {ac.squawk}</div>
+                    )}
+                    <div><strong>Position:</strong> {ac.lat.toFixed(4)}, {ac.lon.toFixed(4)}</div>
+                    {ac.rssi !== undefined && (
+                      <div><strong>Signal:</strong> {ac.rssi.toFixed(1)} dBFS</div>
+                    )}
+                    {ac.seenPos !== undefined && (
+                      <div><strong>Position Age:</strong> {ac.seenPos.toFixed(1)}s</div>
                     )}
                   </div>
                 </div>
