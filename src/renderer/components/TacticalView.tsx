@@ -68,7 +68,44 @@ function AircraftInitialFit({ aircraft, hasPositionedNodes }: { aircraft: Aircra
   return null;
 }
 
+// Fly the map to a contact when one is selected in the sidebar.
+function FlyTo({ target }: { target: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) map.flyTo(target, Math.max(map.getZoom(), 13), { duration: 1 });
+  }, [target, map]);
+  return null;
+}
+
+// Re-measure the map whenever `trigger` changes (e.g. the sidebar opens/closes
+// and the map's width changes), so Leaflet doesn't leave grey gutters.
+function InvalidateSize({ trigger }: { trigger: unknown }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 80);
+    return () => clearTimeout(t);
+  }, [trigger, map]);
+  return null;
+}
+
+type ContactSource = 'meshtastic' | 'adsb' | 'tak';
+interface Contact {
+  id: string;
+  source: ContactSource;
+  name: string;
+  sub: string;
+  meta: string;
+  color: string;
+  hasPosition: boolean;
+  lat?: number;
+  lon?: number;
+}
+
 export default function TacticalView({ nodes, radios, aircraft = [] }: TacticalViewProps) {
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [sourceFilter, setSourceFilter] = useState<'all' | ContactSource>('all');
+  const [contactSearch, setContactSearch] = useState('');
+  const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
   const [showBreadcrumbs, setShowBreadcrumbs] = useState(true);
@@ -266,6 +303,73 @@ All devices must use the EXACT same PSK and channel index.`;
     : visibleAircraft.length > 0
       ? [visibleAircraft[0].lat, visibleAircraft[0].lon]
       : [40.7128, -74.0060];
+
+  const formatTimeAgo = (date: Date): string => {
+    const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  // ===== Unified sidebar contacts (Meshtastic nodes + ADS-B aircraft + future TAK) =====
+  const meshContacts: Contact[] = nodes.map(node => ({
+    id: `mesh-${node.nodeId}`,
+    source: 'meshtastic',
+    name: node.longName || node.shortName || node.nodeId,
+    sub: `${node.shortName} • ${node.nodeId}`,
+    meta: formatTimeAgo(node.lastHeard),
+    color: getNodeColor(node),
+    hasPosition: !!node.position,
+    lat: node.position?.latitude,
+    lon: node.position?.longitude,
+  }));
+
+  const adsbContacts: Contact[] = visibleAircraft.map(ac => ({
+    id: `adsb-${ac.icao}`,
+    source: 'adsb',
+    name: ac.callsign || ac.icao.toUpperCase(),
+    sub: `ICAO ${ac.icao.toUpperCase()}${ac.squawk ? ` • SQ ${ac.squawk}` : ''}`,
+    meta: [
+      ac.altFt !== undefined ? `${Math.round(ac.altFt).toLocaleString()}ft` : null,
+      ac.groundSpeedKt !== undefined ? `${Math.round(ac.groundSpeedKt)}kt` : null,
+    ].filter(Boolean).join(' • '),
+    color: ac.emergency ? '#ef4444' : '#22d3ee',
+    hasPosition: true,
+    lat: ac.lat,
+    lon: ac.lon,
+  }));
+
+  // TAK/CoT tracks are not ingested yet — reserved bucket for the future TAK feed.
+  const takContacts: Contact[] = [];
+
+  const allContacts = [...meshContacts, ...adsbContacts, ...takContacts];
+  const counts = {
+    all: allContacts.length,
+    meshtastic: meshContacts.length,
+    adsb: adsbContacts.length,
+    tak: takContacts.length,
+  };
+
+  const search = contactSearch.trim().toLowerCase();
+  const filteredContacts = allContacts
+    .filter(c => sourceFilter === 'all' || c.source === sourceFilter)
+    .filter(c => !search || c.name.toLowerCase().includes(search) || c.sub.toLowerCase().includes(search))
+    .sort((a, b) => {
+      if (a.hasPosition && !b.hasPosition) return -1;
+      if (!a.hasPosition && b.hasPosition) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  const sourceTabs: Array<{ key: 'all' | ContactSource; label: string }> = [
+    { key: 'all', label: 'All' },
+    { key: 'meshtastic', label: 'Mesh' },
+    { key: 'adsb', label: 'ADS-B' },
+    { key: 'tak', label: 'TAK' },
+  ];
+  const sourceTag = (s: ContactSource) => (s === 'meshtastic' ? 'MESH' : s === 'adsb' ? 'ADS-B' : 'TAK');
 
   return (
     <div className="space-y-6">
@@ -506,14 +610,97 @@ All devices must use the EXACT same PSK and channel index.`;
         </div>
       </div>
 
-      {/* Tactical Map */}
-      <div className="card p-0 overflow-hidden" style={{ height: '700px' }}>
+      {/* Tactical Map + Contacts Sidebar */}
+      <div className="card p-0 overflow-hidden flex relative" style={{ height: '700px' }}>
+        {/* Contacts Sidebar */}
+        {showSidebar && (
+          <div className="w-72 flex-shrink-0 bg-slate-900/95 border-r border-slate-700 overflow-y-auto">
+            <div className="p-3 border-b border-slate-700 sticky top-0 bg-slate-900/95 z-[500]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-white text-sm">Contacts ({counts.all})</h3>
+                <button
+                  onClick={() => setShowSidebar(false)}
+                  className="text-slate-400 hover:text-white"
+                  title="Hide sidebar"
+                >
+                  ✕
+                </button>
+              </div>
+              {/* Source filter */}
+              <div className="grid grid-cols-4 gap-1 mb-2">
+                {sourceTabs.map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setSourceFilter(tab.key)}
+                    className={`text-[11px] px-1 py-1 rounded font-medium transition-colors ${
+                      sourceFilter === tab.key
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                    title={`${tab.label} (${counts[tab.key]})`}
+                  >
+                    {tab.label}
+                    <span className="ml-1 opacity-70">{counts[tab.key]}</span>
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+                placeholder="Search contacts…"
+                className="w-full bg-slate-800 text-white text-xs rounded px-2 py-1 border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="divide-y divide-slate-800">
+              {filteredContacts.length === 0 && (
+                <div className="p-3 text-xs text-slate-500">No contacts for this filter</div>
+              )}
+              {filteredContacts.map(c => (
+                <div
+                  key={c.id}
+                  onClick={() => {
+                    if (c.hasPosition && c.lat != null && c.lon != null) setFlyTo([c.lat, c.lon]);
+                  }}
+                  className={`p-2.5 ${c.hasPosition ? 'cursor-pointer hover:bg-slate-800' : 'opacity-50'}`}
+                  title={c.hasPosition ? 'Click to locate on map' : 'No location data'}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.color }} />
+                    <span className="text-sm text-white font-medium truncate">{c.name}</span>
+                    <span className="ml-auto text-[9px] uppercase tracking-wide text-slate-500 flex-shrink-0">
+                      {sourceTag(c.source)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 ml-4 truncate">{c.sub}</div>
+                  {c.meta && <div className="text-[11px] text-slate-500 mt-0.5 ml-4">{c.meta}</div>}
+                  {!c.hasPosition && <div className="text-[11px] text-slate-600 mt-0.5 ml-4">No location</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Show-sidebar button when hidden */}
+        {!showSidebar && (
+          <button
+            onClick={() => setShowSidebar(true)}
+            className="absolute left-3 top-3 z-[500] bg-slate-900/90 text-white text-xs px-3 py-2 rounded shadow-lg border border-slate-700 hover:bg-slate-800"
+          >
+            📋 Contacts ({counts.all})
+          </button>
+        )}
+
+        {/* Map */}
+        <div className="flex-1 relative">
         <MapContainer
           center={defaultCenter}
           zoom={13}
           style={{ height: '100%', width: '100%' }}
           zoomControl={true}
         >
+          <InvalidateSize trigger={showSidebar} />
+          <FlyTo target={flyTo} />
           <AutoFitBounds nodes={nodesWithPosition} />
           <AircraftInitialFit aircraft={visibleAircraft} hasPositionedNodes={nodesWithPosition.length > 0} />
 
@@ -638,6 +825,7 @@ All devices must use the EXACT same PSK and channel index.`;
             </Marker>
           ))}
         </MapContainer>
+        </div>
       </div>
 
       {/* Legend */}
