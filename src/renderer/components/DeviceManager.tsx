@@ -23,7 +23,12 @@ export default function DeviceManager(props: DeviceManagerProps) {
 
   const tabs: { id: DeviceTab; label: string; icon: string }[] = [
     { id: 'radios', label: 'USB/Serial Radios', icon: '📻' },
-    { id: 'bluetooth', label: 'Bluetooth Scanner', icon: '🔵' },
+    // Bluetooth Scanner hidden: BLE support is disabled server-side (the
+    // @abandonware/noble dependency was removed for headless/container/VM
+    // deployments without Bluetooth hardware). To restore: reinstall
+    // @abandonware/noble, re-enable BluetoothProtocol in
+    // bridge-server/protocols/index.mjs, and uncomment the line below.
+    // { id: 'bluetooth', label: 'Bluetooth Scanner', icon: '🔵' },
     { id: 'config', label: 'Radio Configuration', icon: '⚙️' },
     { id: 'ports', label: 'Port Exclusion', icon: '🔌' },
   ];
