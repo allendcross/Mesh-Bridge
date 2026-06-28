@@ -143,6 +143,57 @@ function RadioConfigPage({ radios, onGetChannel, onSetChannel, onGetConfig, onSe
     onSetChannel(selectedRadioId, channelConfig);
   };
 
+  // Default Meshtastic primary channel PSK (single byte 0x01 → "AQ==", the public LongFast key)
+  const DEFAULT_PRIMARY_PSK = 'AQ==';
+
+  // Send a channel config straight to the radio (bypasses the form), and mirror it locally.
+  const sendChannelRaw = (index: number, data: ChannelFormData) => {
+    if (!selectedRadioId) return;
+    let psk: Uint8Array | undefined;
+    if (data.pskBase64) {
+      try {
+        const binary = atob(data.pskBase64);
+        psk = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) psk[i] = binary.charCodeAt(i);
+      } catch {
+        psk = undefined;
+      }
+    }
+    onSetChannel(selectedRadioId, {
+      index,
+      settings: {
+        name: data.name || undefined,
+        psk,
+        uplinkEnabled: data.uplinkEnabled,
+        downlinkEnabled: data.downlinkEnabled,
+      },
+      role: data.role,
+    });
+    updateChannel(index, data);
+  };
+
+  // Clear a single channel: reset primary to default, disable any secondary.
+  const handleClearChannel = (index: number) => {
+    if (!selectedRadioId) return;
+    if (index === 0) {
+      if (!confirm('Reset the primary channel to default (LongFast, public key)?')) return;
+      sendChannelRaw(0, { name: '', pskBase64: DEFAULT_PRIMARY_PSK, role: 'PRIMARY', uplinkEnabled: false, downlinkEnabled: false });
+    } else {
+      if (!confirm(`Clear and disable channel ${index}? This wipes its name and disables it.`)) return;
+      sendChannelRaw(index, { name: '', pskBase64: '', role: 'DISABLED', uplinkEnabled: false, downlinkEnabled: false });
+    }
+  };
+
+  // Reset all channels: primary → default LongFast, channels 1-7 → disabled.
+  const handleResetAllChannels = () => {
+    if (!selectedRadioId) return;
+    if (!confirm('Reset ALL channels?\n\nChannel 0 → default LongFast (public), channels 1-7 → disabled. This cannot be undone.')) return;
+    sendChannelRaw(0, { name: '', pskBase64: DEFAULT_PRIMARY_PSK, role: 'PRIMARY', uplinkEnabled: false, downlinkEnabled: false });
+    for (let i = 1; i < 8; i++) {
+      setTimeout(() => sendChannelRaw(i, { name: '', pskBase64: '', role: 'DISABLED', uplinkEnabled: false, downlinkEnabled: false }), i * 600);
+    }
+  };
+
   const updateChannel = (index: number, updates: Partial<ChannelFormData>) => {
     setChannels((prev) => ({
       ...prev,
@@ -249,14 +300,23 @@ function RadioConfigPage({ radios, onGetChannel, onSetChannel, onGetConfig, onSe
               <div className="card p-4 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-white mb-1">Bulk Channel Operations</h3>
-                  <p className="text-sm text-slate-400">Retrieve configuration for all channels at once</p>
+                  <p className="text-sm text-slate-400">Retrieve all channels, or reset them to defaults</p>
                 </div>
-                <button
-                  onClick={handleGetAllChannels}
-                  className="btn-secondary"
-                >
-                  📡 Get All Channels
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleGetAllChannels}
+                    className="btn-secondary"
+                  >
+                    📡 Get All Channels
+                  </button>
+                  <button
+                    onClick={handleResetAllChannels}
+                    className="text-sm py-2 px-3 rounded-lg bg-red-600/80 text-white hover:bg-red-600"
+                    title="Primary → default LongFast, channels 1-7 → disabled"
+                  >
+                    🧹 Reset All
+                  </button>
+                </div>
               </div>
 
               {/* Channel Configuration Grid */}
@@ -382,13 +442,22 @@ function RadioConfigPage({ radios, onGetChannel, onSetChannel, onGetConfig, onSe
                         </label>
                       </div>
 
-                      {/* Set Button */}
-                      <button
-                        onClick={() => handleSetChannel(index)}
-                        className="btn-primary w-full text-sm py-2"
-                      >
-                        💾 Set Channel {index}
-                      </button>
+                      {/* Set / Clear Buttons */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleSetChannel(index)}
+                          className="btn-primary flex-1 text-sm py-2"
+                        >
+                          💾 Set Channel {index}
+                        </button>
+                        <button
+                          onClick={() => handleClearChannel(index)}
+                          className="text-sm py-2 px-3 rounded-lg bg-slate-700 text-white hover:bg-red-600/80"
+                          title={index === 0 ? 'Reset primary to default' : 'Clear & disable this channel'}
+                        >
+                          {index === 0 ? '↺ Reset' : '🧹 Clear'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   );

@@ -152,6 +152,16 @@ export class MeshtasticProtocol extends BaseProtocol {
       node.snr = update.snr;
     }
 
+    // Channel - record which channel index this node was last heard on, and
+    // the set of channels it's ever been heard on (used for team filtering).
+    if (update.channelIndex !== undefined && update.channelIndex !== null) {
+      node.channelIndex = update.channelIndex;
+      if (!Array.isArray(node.channels)) node.channels = [];
+      if (!node.channels.includes(update.channelIndex)) {
+        node.channels.push(update.channelIndex);
+      }
+    }
+
     // Store back in catalog
     this.nodeCatalog.set(nodeNum, node);
 
@@ -423,6 +433,7 @@ export class MeshtasticProtocol extends BaseProtocol {
         if (positionPacket.data && (positionPacket.data.latitudeI || positionPacket.data.longitudeI)) {
           // Update node catalog with position data
           const update = {
+            channelIndex: positionPacket.channel,
             position: {
               latitude: positionPacket.data.latitudeI / 1e7,
               longitude: positionPacket.data.longitudeI / 1e7,
@@ -452,7 +463,7 @@ export class MeshtasticProtocol extends BaseProtocol {
         }
 
         const data = telemetryPacket.data;
-        const update = {};
+        const update = { channelIndex: telemetryPacket.channel };
 
         if (!data.variant || !data.variant.case) {
           return; // Skip packets without variant data

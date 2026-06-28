@@ -123,6 +123,8 @@ export interface MeshNode {
   temperature?: number;
   humidity?: number;
   pressure?: number;
+  channelIndex?: number;   // last channel index this node was heard on
+  channels?: number[];     // all channel indices this node has been heard on (team filtering)
   fromRadio: string; // Which radio saw this node
 }
 

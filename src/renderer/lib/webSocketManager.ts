@@ -153,6 +153,16 @@ export class WebSocketRadioManager {
       return stored;
     }
 
+    // Behind a TLS reverse proxy (Tailscale Serve, Caddy, nginx): the page is
+    // served over HTTPS and the proxy forwards the WebSocket upgrade to the
+    // bridge on the same origin. Use wss:// + location.host (no hardcoded :8080)
+    // to avoid mixed-content blocking and the un-proxied 8080 port.
+    if (window.location.protocol === 'https:') {
+      const url = `wss://${window.location.host}`;
+      console.log(`[WebSocketManager] HTTPS detected — using proxied WebSocket: ${url}`);
+      return url;
+    }
+
     // Smart default: If accessing via LAN IP, use that IP. Otherwise use localhost.
     const hostname = window.location.hostname;
 

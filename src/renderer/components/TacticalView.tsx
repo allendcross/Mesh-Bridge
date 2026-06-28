@@ -142,6 +142,8 @@ export default function TacticalView({ nodes, radios, aircraft = [], stationLoca
   const [gotoInput, setGotoInput] = useState('');
   const [gotoError, setGotoError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
+  const [teamChannel, setTeamChannel] = useState<number | null>(null); // null = all channels
+  const [hideNonTeam, setHideNonTeam] = useState(false);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
   const [showAircraftTrails, setShowAircraftTrails] = useState(true);
@@ -384,18 +386,50 @@ All devices must use the EXACT same PSK and channel index.`;
     return `${Math.floor(hours / 24)}d ago`;
   };
 
+  // ===== Team channel filtering =====
+  // Channels available across all connected radios (index -> display name).
+  const availableChannels = (() => {
+    const map = new Map<number, string>();
+    radios.forEach(r => {
+      (r.channels || []).forEach(ch => {
+        const name = ch.settings?.name?.trim();
+        // Skip fully-disabled/empty channels (role DISABLED with no name)
+        if (name || ch.role !== undefined) {
+          map.set(ch.index, name || `Channel ${ch.index}`);
+        }
+      });
+    });
+    // Include any channel indices seen on nodes but not in radio config.
+    nodes.forEach(n => (n.channels || []).forEach(ci => {
+      if (!map.has(ci)) map.set(ci, `Channel ${ci}`);
+    }));
+    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+  })();
+
+  // A node is "team" if it has been heard on the selected team channel.
+  const isTeamNode = (node: MeshNode): boolean => {
+    if (teamChannel === null) return true;
+    if (Array.isArray(node.channels)) return node.channels.includes(teamChannel);
+    return node.channelIndex === teamChannel;
+  };
+
   // ===== Unified sidebar contacts (Meshtastic nodes + ADS-B aircraft + future TAK) =====
-  const meshContacts: Contact[] = nodes.map(node => ({
-    id: `mesh-${node.nodeId}`,
-    source: 'meshtastic',
-    name: node.longName || node.shortName || node.nodeId,
-    sub: `${node.shortName} • ${node.nodeId}`,
-    meta: formatTimeAgo(node.lastHeard),
-    color: getNodeColor(node),
-    hasPosition: !!node.position,
-    lat: node.position?.latitude,
-    lon: node.position?.longitude,
-  }));
+  const meshContacts: Contact[] = nodes
+    .filter(node => !(hideNonTeam && teamChannel !== null && !isTeamNode(node)))
+    .map(node => {
+      const team = teamChannel !== null && isTeamNode(node);
+      return {
+        id: `mesh-${node.nodeId}`,
+        source: 'meshtastic' as const,
+        name: `${team ? '★ ' : ''}${node.longName || node.shortName || node.nodeId}`,
+        sub: `${node.shortName} • ${node.nodeId}`,
+        meta: formatTimeAgo(node.lastHeard),
+        color: getNodeColor(node),
+        hasPosition: !!node.position,
+        lat: node.position?.latitude,
+        lon: node.position?.longitude,
+      };
+    });
 
   const adsbContacts: Contact[] = visibleAircraft.map(ac => ({
     id: `adsb-${ac.icao}`,
@@ -652,8 +686,16 @@ All devices must use the EXACT same PSK and channel index.`;
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="card">
             <div className="text-sm text-slate-400">Team Members</div>
-            <div className="text-3xl font-bold text-white">{nodesWithPosition.length}</div>
-            <div className="text-xs text-slate-500">with GPS</div>
+            <div className="text-3xl font-bold text-white">
+              {teamChannel === null
+                ? nodesWithPosition.length
+                : nodesWithPosition.filter(isTeamNode).length}
+            </div>
+            <div className="text-xs text-slate-500">
+              {teamChannel === null
+                ? 'all channels, with GPS'
+                : `on "${availableChannels.find(([i]) => i === teamChannel)?.[1] ?? `Channel ${teamChannel}`}"`}
+            </div>
           </div>
 
           <div className="card">
@@ -693,6 +735,31 @@ All devices must use the EXACT same PSK and channel index.`;
       {/* Map Controls */}
       <div className="card">
         <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-slate-300">🛡️ Team:</label>
+            <select
+              value={teamChannel === null ? 'all' : String(teamChannel)}
+              onChange={(e) => setTeamChannel(e.target.value === 'all' ? null : parseInt(e.target.value))}
+              className="bg-slate-700 text-white text-sm rounded px-2 py-1 border border-slate-600"
+            >
+              <option value="all">All channels</option>
+              {availableChannels.map(([index, name]) => (
+                <option key={index} value={index}>{name} (ch {index})</option>
+              ))}
+            </select>
+            {teamChannel !== null && (
+              <label className="flex items-center gap-1 text-sm text-slate-300 ml-1">
+                <input
+                  type="checkbox"
+                  checked={hideNonTeam}
+                  onChange={(e) => setHideNonTeam(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-blue-500"
+                />
+                Hide non-team
+              </label>
+            )}
+          </div>
+
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -977,11 +1044,14 @@ All devices must use the EXACT same PSK and channel index.`;
           })}
 
           {/* Node Markers */}
-          {nodesWithPosition.map(node => (
+          {nodesWithPosition
+            .filter(node => !(hideNonTeam && teamChannel !== null && !isTeamNode(node)))
+            .map(node => (
             <Marker
               key={node.nodeId}
               position={[node.position!.latitude, node.position!.longitude]}
               icon={createNodeIcon(node)}
+              opacity={teamChannel !== null && !isTeamNode(node) ? 0.4 : 1}
             >
               <Popup>
                 <div className="min-w-[200px]">
