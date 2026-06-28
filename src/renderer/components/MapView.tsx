@@ -51,6 +51,27 @@ interface MapViewProps {
   radios: Radio[];
 }
 
+// Force Leaflet to recompute its size after the (flex) container has laid out.
+// Without this the map can initialize at the wrong size and render as a grey box.
+function InvalidateSize() {
+  const map = useMap();
+
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    // Re-measure after layout settles, then again shortly after, plus on resize.
+    const t1 = setTimeout(fix, 100);
+    const t2 = setTimeout(fix, 400);
+    window.addEventListener('resize', fix);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener('resize', fix);
+    };
+  }, [map]);
+
+  return null;
+}
+
 // Component to auto-fit bounds when markers change
 function MapBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
@@ -257,6 +278,7 @@ export function MapView({ nodes, radios }: MapViewProps) {
             style={{ height: '100%', width: '100%' }}
             zoomControl={true}
           >
+            <InvalidateSize />
             {mapLayer === 'osm' && (
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

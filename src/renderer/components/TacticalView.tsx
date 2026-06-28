@@ -30,11 +30,15 @@ interface TacticalChannel {
   description: string;
 }
 
-// Auto-fit map to show all nodes
+// One-shot fit to nodes on first load. Fits only once so the map doesn't snap
+// back to the node bounds on every re-render (aircraft updates re-render ~every 2s,
+// which previously fought the user's pan/zoom).
 function AutoFitBounds({ nodes }: { nodes: MeshNode[] }) {
   const map = useMap();
+  const fitted = useRef(false);
 
   useEffect(() => {
+    if (fitted.current) return;
     const nodesWithPos = nodes.filter(n => n.position);
     if (nodesWithPos.length === 0) return;
 
@@ -42,6 +46,7 @@ function AutoFitBounds({ nodes }: { nodes: MeshNode[] }) {
       nodesWithPos.map(n => [n.position!.latitude, n.position!.longitude])
     );
     map.fitBounds(bounds, { padding: [50, 50] });
+    fitted.current = true;
   }, [nodes, map]);
 
   return null;
