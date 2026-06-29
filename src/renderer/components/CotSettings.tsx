@@ -48,7 +48,6 @@ export default function CotSettings() {
   const [takHost, setTakHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
   const [takPort, setTakPort] = useState(8089);
   const [qrDataUrl, setQrDataUrl] = useState('');
-  const [qrBusy, setQrBusy] = useState(false);
   const [qrErr, setQrErr] = useState('');
 
   // Direct download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
@@ -67,11 +66,9 @@ export default function CotSettings() {
   useEffect(() => {
     setQrErr('');
     if (!takHost || !packageUrl) { setQrDataUrl(''); return; }
-    setQrBusy(true);
     QRCode.toDataURL(packageUrl, { width: 280, margin: 2, errorCorrectionLevel: 'L' })
       .then((u) => setQrDataUrl(u))
-      .catch((e) => { setQrErr(e?.message || 'Failed to generate QR'); setQrDataUrl(''); })
-      .finally(() => setQrBusy(false));
+      .catch((e) => { setQrErr(e?.message || 'Failed to generate QR'); setQrDataUrl(''); });
   }, [packageUrl, takHost]);
 
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
