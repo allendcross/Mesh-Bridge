@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { useStore } from '../store/useStore';
 
 interface CotForm {
@@ -46,10 +47,22 @@ export default function CotSettings() {
   // (their LAN IP, or their Tailscale hostname), which is exactly what the phone should use.
   const [takHost, setTakHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
   const [takPort, setTakPort] = useState(8089);
+  const [qrDataUrl, setQrDataUrl] = useState('');
+
+  // Absolute download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
+  const packageUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`
+    : '';
+
+  // Regenerate the QR whenever the connection details change.
+  useEffect(() => {
+    if (!takHost) { setQrDataUrl(''); return; }
+    QRCode.toDataURL(packageUrl, { width: 240, margin: 1 }).then(setQrDataUrl).catch(() => setQrDataUrl(''));
+  }, [packageUrl, takHost]);
 
   const downloadPackage = () => {
     if (!takHost) return;
-    window.location.href = `/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`;
+    window.location.href = packageUrl;
   };
 
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
@@ -199,14 +212,26 @@ export default function CotSettings() {
             <input type="number" value={takPort} onChange={(e) => setTakPort(parseInt(e.target.value) || 8089)} className="input w-full" />
           </div>
         </div>
-        <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
-          ⤓ Download Connection Package (.zip)
-        </button>
-        <p className="text-xs text-slate-500">
-          AirDrop / email the downloaded <span className="font-mono">MeshBridge.zip</span> to your device, then import it in iTAK/ATAK.
-          The host is pre-filled with however you reached this page; change it to your Tailscale IP for remote use.
-          Requires FreeTAKServer (certs at <span className="font-mono">/opt/freetakserver/data/certs</span>).
-        </p>
+        <div className="flex flex-col md:flex-row gap-5 items-start">
+          <div className="flex-1">
+            <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
+              ⤓ Download Connection Package (.zip)
+            </button>
+            <p className="text-xs text-slate-500 mt-2">
+              AirDrop / email the downloaded <span className="font-mono">MeshBridge.zip</span> to your device, then import it in iTAK/ATAK.
+              The host is pre-filled with however you reached this page; change it to your Tailscale IP for remote use.
+              Requires FreeTAKServer (certs at <span className="font-mono">/opt/freetakserver/data/certs</span>).
+            </p>
+          </div>
+
+          {/* QR quick-connect: scan with the phone to fetch the package */}
+          {qrDataUrl && (
+            <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
+              <img src={qrDataUrl} alt="TAK connection QR" width={200} height={200} />
+              <span className="text-xs text-slate-700 mt-1 font-medium">📷 Scan to download on phone</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="card p-4 bg-blue-500/10 border border-blue-500/30">
