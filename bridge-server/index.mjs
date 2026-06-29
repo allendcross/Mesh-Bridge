@@ -30,6 +30,7 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import { AdsbService } from './services/AdsbService.mjs';
 import { CotService } from './services/CotService.mjs';
+import { CotIngestService } from './services/CotIngestService.mjs';
 import { buildTakDataPackage } from './services/TakPackageService.mjs';
 import { createHash } from 'crypto';
 import fetch from 'node-fetch';
@@ -226,6 +227,15 @@ class MeshtasticBridgeServer {
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
     this.cotTcpPort = 8087;                  // FreeTAKServer CoT streaming port
     this.cotService = null;                  // CotService instance
+
+    // TAK ingest (inbound CoT from the TAK Server → monitoring map)
+    this.takIngestEnabled = false;           // off by default
+    this.takIngestHost = '192.168.0.198';    // TAK Server host
+    this.takIngestPort = 8089;               // CoT streaming (mutual-TLS) port
+    this.takIngestCertName = 'meshbridge-monitor'; // client cert basename in takCertsPath
+    this.takIngestGeoChat = true;            // ingest GeoChat (b-t-f)
+    this.takIngestDrawings = true;           // ingest drawings/shapes (u-d-*)
+    this.takIngestService = null;            // CotIngestService instance
     this.takCertsPath = '/opt/takserver/tak/certs/files'; // TAK server certs (for client data packages)
     this.takPackageCache = new Map(); // hash -> { buf, name } for ATAK QR (Marti sync) import
 
@@ -469,6 +479,17 @@ class MeshtasticBridgeServer {
           console.log(`📋 Loaded CoT/TAK config: ${this.cotEnabled ? 'ENABLED' : 'DISABLED'}${this.cotTcpHost ? ` (TCP feed → ${this.cotTcpHost}:${this.cotTcpPort})` : ''}`);
         }
 
+        // Load TAK ingest (inbound CoT) configuration
+        if (config.takIngest) {
+          if (config.takIngest.enabled !== undefined) this.takIngestEnabled = config.takIngest.enabled;
+          if (config.takIngest.host !== undefined) this.takIngestHost = config.takIngest.host;
+          if (config.takIngest.port !== undefined) this.takIngestPort = config.takIngest.port;
+          if (config.takIngest.certName) this.takIngestCertName = config.takIngest.certName;
+          if (config.takIngest.includeGeoChat !== undefined) this.takIngestGeoChat = config.takIngest.includeGeoChat;
+          if (config.takIngest.includeDrawings !== undefined) this.takIngestDrawings = config.takIngest.includeDrawings;
+          console.log(`📋 Loaded TAK ingest config: ${this.takIngestEnabled ? `ENABLED (← ${this.takIngestHost}:${this.takIngestPort})` : 'DISABLED'}`);
+        }
+
         // Load Port Exclusion configuration
         if (Array.isArray(config.excludedPorts)) {
           this.excludedPorts = config.excludedPorts;
@@ -564,6 +585,14 @@ class MeshtasticBridgeServer {
           tcpHost: this.cotTcpHost,
           tcpPort: this.cotTcpPort,
           certsPath: this.takCertsPath
+        },
+        takIngest: {
+          enabled: this.takIngestEnabled,
+          host: this.takIngestHost,
+          port: this.takIngestPort,
+          certName: this.takIngestCertName,
+          includeGeoChat: this.takIngestGeoChat,
+          includeDrawings: this.takIngestDrawings
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -1385,6 +1414,9 @@ class MeshtasticBridgeServer {
       // Start CoT/TAK output (if enabled)
       this.startCotService();
 
+      // Start TAK ingest — inbound CoT from the TAK Server (if enabled)
+      this.startTakIngestService();
+
       // Resolve where the server is, to auto-center the Tactical map
       this.resolveStationLocation();
 
@@ -1541,6 +1573,14 @@ class MeshtasticBridgeServer {
 
         case 'set-cot-config':
           await this.cotSetConfig(ws, message.config || {});
+          break;
+
+        case 'get-tak-ingest-config':
+          this.sendTakIngestConfig(ws);
+          break;
+
+        case 'set-tak-ingest-config':
+          await this.takIngestSetConfig(ws, message.config || {});
           break;
 
         case 'set-adsb-config':
@@ -6128,6 +6168,62 @@ class MeshtasticBridgeServer {
     } catch (error) {
       console.error('❌ Error setting CoT config:', error);
       ws.send(JSON.stringify({ type: 'cot-config-updated', success: false, error: error.message }));
+    }
+  }
+
+  // ===== TAK INGEST (inbound CoT) =====
+
+  takIngestOptions() {
+    return {
+      enabled: this.takIngestEnabled,
+      host: this.takIngestHost,
+      port: this.takIngestPort,
+      certsPath: this.takCertsPath,
+      certName: this.takIngestCertName,
+      includeGeoChat: this.takIngestGeoChat,
+      includeDrawings: this.takIngestDrawings,
+    };
+  }
+
+  startTakIngestService() {
+    this.stopTakIngestService();
+    this.takIngestService = new CotIngestService(
+      this.takIngestOptions(),
+      (payload) => this.broadcast(payload), // tak-update / tak-chat / tak-remove
+      (level, msg) => console.log(msg)
+    );
+    this.takIngestService.start();
+  }
+
+  stopTakIngestService() {
+    if (this.takIngestService) {
+      this.takIngestService.stop();
+      this.takIngestService = null;
+    }
+  }
+
+  sendTakIngestConfig(ws) {
+    ws.send(JSON.stringify({ type: 'tak-ingest-config', config: this.takIngestOptions() }));
+  }
+
+  async takIngestSetConfig(ws, config) {
+    try {
+      if (config.enabled !== undefined) this.takIngestEnabled = config.enabled;
+      if (config.host !== undefined) this.takIngestHost = config.host;
+      if (config.port !== undefined) this.takIngestPort = config.port;
+      if (config.certName) this.takIngestCertName = config.certName;
+      if (config.includeGeoChat !== undefined) this.takIngestGeoChat = config.includeGeoChat;
+      if (config.includeDrawings !== undefined) this.takIngestDrawings = config.includeDrawings;
+
+      this.saveConfig();
+      this.startTakIngestService();
+
+      console.log(`✅ TAK ingest configuration updated (enabled: ${this.takIngestEnabled})`);
+      ws.send(JSON.stringify({ type: 'tak-ingest-config-updated', success: true }));
+      this.broadcast({ type: 'tak-ingest-config-changed', config: this.takIngestOptions() });
+    } catch (error) {
+      console.error('❌ Error setting TAK ingest config:', error);
+      ws.send(JSON.stringify({ type: 'tak-ingest-config-updated', success: false, error: error.message }));
     }
   }
 

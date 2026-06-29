@@ -1,6 +1,48 @@
 # TAK Ingest — Inbound CoT for a Common Operating Picture
 
-**Status:** Planned (design)
+**Status:** Phase 1 (backend ingest) ✅ COMPLETE — Phases 2–5 pending.
+
+## Phase 1 — done (backend ingest)
+
+Implemented & verified end-to-end (bridge ingests ChopsWinTAK's position and
+broadcasts it over WS):
+- `meshbridge-monitor` client cert minted + registered in `__ANON__`.
+- `bridge-server/services/CotIngestService.mjs` — mutual-TLS to `:8089`, identity
+  CoT, frame reassembly on `</event>`, regex parse + classify, drops `t-x-*`
+  control events and own `meshtastic-*`/`adsb-*` echoes, reconnect-with-backoff.
+- `index.mjs` — `takIngest` config (load/save), `startTakIngestService()` on boot,
+  `get/set-tak-ingest-config` WS handlers, broadcasts ingest payloads to clients.
+
+### WebSocket message contract (what Phase 2 consumes)
+
+```jsonc
+// contact (other TAK client) or marker (dropped point) or drawing
+{ "type": "tak-update", "contact": {
+    "uid": "...", "source": "tak",
+    "kind": "contact" | "marker" | "drawing",
+    "cotType": "a-f-G-U-C-I", "callsign": "ChopsWinTAK",
+    "lat": 36.27, "lon": -115.23,
+    "team": "Maroon", "role": "Team Member",
+    "course": 0, "speed": 0,          // contacts w/ <track>
+    "platform": "WinTAK-CIV",          // contacts w/ <takv>
+    "remarks": "...", "stale": "2026-…Z",
+    "points": [[lat,lon], …]           // drawings only
+} }
+// GeoChat
+{ "type": "tak-chat", "chat": { "uid","room","sender","text","time" } }
+// removal (CoT delete t-x-d-d)
+{ "type": "tak-remove", "uid": "..." }
+```
+
+Frontend (Phase 2): handle these in `webSocketManager.ts`, store
+`takContacts`/`takMarkers`/`takDrawings` (keyed by uid, expire on `stale`) +
+`takChat`, render under the existing **TAK** source filter in `TacticalView`.
+
+---
+
+**Original design below.**
+
+
 
 ## Quick start for the implementation session
 
