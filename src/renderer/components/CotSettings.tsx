@@ -50,6 +50,20 @@ export default function CotSettings() {
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [qrErr, setQrErr] = useState('');
 
+  // Native ATAK/iTAK enrollment QR — the official TAK Server supports username/password
+  // certificate enrollment, so iTAK's in-app scanner accepts this tak://...enroll QR:
+  // scan -> enter nothing -> it enrolls over TLS and connects. No file handling.
+  const [enrollHost, setEnrollHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
+  const [enrollUser, setEnrollUser] = useState('meshbridge');
+  const [enrollToken, setEnrollToken] = useState('');
+  const [enrollQr, setEnrollQr] = useState('');
+
+  useEffect(() => {
+    if (!enrollHost || !enrollUser || !enrollToken) { setEnrollQr(''); return; }
+    const url = `tak://com.atakmap.app/enroll?host=${encodeURIComponent(enrollHost)}&username=${encodeURIComponent(enrollUser)}&token=${encodeURIComponent(enrollToken)}`;
+    QRCode.toDataURL(url, { width: 280, margin: 2 }).then(setEnrollQr).catch(() => setEnrollQr(''));
+  }, [enrollHost, enrollUser, enrollToken]);
+
   // Direct download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
   const packageUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`
@@ -195,7 +209,45 @@ export default function CotSettings() {
         {saved && <span className="text-sm text-green-400">✓ Saved — applied to the live feed.</span>}
       </div>
 
-      {/* TAK client connection package */}
+      {/* Native enrollment QR (official TAK Server) */}
+      <div className="card p-6 space-y-3 border border-green-500/30">
+        <h3 className="text-lg font-bold text-white">⚡ ATAK / iTAK Quick-Connect (Enrollment QR)</h3>
+        <p className="text-sm text-slate-400">
+          Scan this with iTAK/ATAK's <strong>built-in QR scanner</strong> (Settings → scan) — it enrolls over TLS using the
+          username/password, downloads a client certificate automatically, and connects. No file import.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Server host/IP</label>
+            <input type="text" value={enrollHost} onChange={(e) => setEnrollHost(e.target.value)} className="input w-full text-sm font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Enrollment username</label>
+            <input type="text" value={enrollUser} onChange={(e) => setEnrollUser(e.target.value)} className="input w-full text-sm font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Enrollment password/token</label>
+            <input type="text" value={enrollToken} onChange={(e) => setEnrollToken(e.target.value)} placeholder="paste the token" className="input w-full text-sm font-mono" />
+          </div>
+        </div>
+        <div className="flex flex-col md:flex-row gap-5 items-start">
+          <p className="flex-1 text-xs text-slate-500">
+            Enrollment connects to <span className="font-mono">{enrollHost || 'host'}:8446</span> (TAK Server cert enrollment).
+            The user must exist on the TAK Server (e.g. <span className="font-mono">meshbridge</span>); the token is its password.
+            The QR contains those credentials — treat it as a secret. Use your Tailscale IP/host for remote devices.
+          </p>
+          {enrollQr ? (
+            <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
+              <img src={enrollQr} alt="ATAK/iTAK enrollment QR" width={220} height={220} />
+              <span className="text-xs text-slate-700 mt-1 font-medium">Scan in ATAK/iTAK to enroll</span>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500 flex-shrink-0 self-center">Enter host, username &amp; token to generate the QR.</div>
+          )}
+        </div>
+      </div>
+
+      {/* TAK client connection package (manual / FreeTAKServer-style fallback) */}
       <div className="card p-6 space-y-3">
         <h3 className="text-lg font-bold text-white">📲 Connect a TAK client (iTAK / ATAK)</h3>
         <p className="text-sm text-slate-400">
