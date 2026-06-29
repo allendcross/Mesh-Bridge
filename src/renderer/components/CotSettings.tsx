@@ -43,13 +43,6 @@ export default function CotSettings() {
   const [form, setForm] = useState<CotForm>(DEFAULTS);
   const [saved, setSaved] = useState(false);
 
-  // TAK client connection package — default the host to however the user reached this GUI
-  // (their LAN IP, or their Tailscale hostname), which is exactly what the phone should use.
-  const [takHost, setTakHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
-  const [takPort, setTakPort] = useState(8089);
-  const [qrDataUrl, setQrDataUrl] = useState('');
-  const [qrErr, setQrErr] = useState('');
-
   // Native ATAK/iTAK enrollment QR — the official TAK Server supports username/password
   // certificate enrollment, so iTAK's in-app scanner accepts this tak://...enroll QR:
   // scan -> enter nothing -> it enrolls over TLS and connects. No file handling.
@@ -63,27 +56,6 @@ export default function CotSettings() {
     const url = `tak://com.atakmap.app/enroll?host=${encodeURIComponent(enrollHost)}&username=${encodeURIComponent(enrollUser)}&token=${encodeURIComponent(enrollToken)}`;
     QRCode.toDataURL(url, { width: 280, margin: 2 }).then(setEnrollQr).catch(() => setEnrollQr(''));
   }, [enrollHost, enrollUser, enrollToken]);
-
-  // Direct download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
-  const packageUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`
-    : '';
-
-  const downloadPackage = () => {
-    if (!takHost) return;
-    window.location.href = packageUrl;
-  };
-
-  // QR encodes the package download URL. iTAK's in-app scanner only accepts TAK
-  // *enrollment* QRs (which FreeTAKServer doesn't support), so this is meant for the
-  // phone CAMERA: scan -> open in browser -> download the .zip -> Share into ATAK/iTAK.
-  useEffect(() => {
-    setQrErr('');
-    if (!takHost || !packageUrl) { setQrDataUrl(''); return; }
-    QRCode.toDataURL(packageUrl, { width: 280, margin: 2, errorCorrectionLevel: 'L' })
-      .then((u) => setQrDataUrl(u))
-      .catch((e) => { setQrErr(e?.message || 'Failed to generate QR'); setQrDataUrl(''); });
-  }, [packageUrl, takHost]);
 
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
@@ -150,12 +122,12 @@ export default function CotSettings() {
         <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
           <div className="text-white font-medium mb-1">🖧 TAK Server (TCP feed)</div>
           <p className="text-xs text-slate-400 mb-2">
-            Stream CoT to a TAK server (e.g. FreeTAKServer). Required for remote clients over Tailscale/WAN. Leave host blank to disable.
+            Stream CoT to a TAK Server. Required for remote clients over Tailscale/WAN. Leave host blank to disable.
           </p>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <label className="block text-xs text-slate-400 mb-1">Server host/IP</label>
-              <input type="text" value={form.tcpHost} onChange={(e) => update({ tcpHost: e.target.value })} placeholder="127.0.0.1 (local FreeTAKServer)" className="input w-full text-sm font-mono" />
+              <input type="text" value={form.tcpHost} onChange={(e) => update({ tcpHost: e.target.value })} placeholder="127.0.0.1 (local TAK Server, port 8087)" className="input w-full text-sm font-mono" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Port</label>
@@ -247,60 +219,32 @@ export default function CotSettings() {
         </div>
       </div>
 
-      {/* TAK client connection package (manual / FreeTAKServer-style fallback) */}
-      <div className="card p-6 space-y-3">
-        <h3 className="text-lg font-bold text-white">📲 Connect a TAK client (iTAK / ATAK)</h3>
+      {/* Manual connection (alternative to the QR) */}
+      <div className="card p-6 space-y-2">
+        <h3 className="text-lg font-bold text-white">🔧 Manual connection (alternative)</h3>
         <p className="text-sm text-slate-400">
-          Generate a connection data package from FreeTAKServer's certificates. Import it into iTAK/ATAK and it
-          configures a secure (TLS) server connection automatically — no username/password enrollment needed.
+          Prefer to add the server by hand in ATAK/iTAK? Use these details. You still need a client certificate,
+          which the server issues during enrollment — so do the QR (or in-app enrollment) at least once, then the
+          connection is reusable.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-slate-300 mb-1">Server host/IP (reachable by the phone)</label>
-            <input
-              type="text"
-              value={takHost}
-              onChange={(e) => setTakHost(e.target.value)}
-              placeholder="192.168.0.198 (LAN) or your Tailscale IP"
-              className="input w-full font-mono text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">TLS port</label>
-            <input type="number" value={takPort} onChange={(e) => setTakPort(parseInt(e.target.value) || 8089)} className="input w-full" />
-          </div>
+        <div className="bg-slate-900 rounded-lg p-3 font-mono text-sm text-slate-200 space-y-1">
+          <div><span className="text-slate-500">Server: </span>{enrollHost || '192.168.0.198'}</div>
+          <div><span className="text-slate-500">CoT (streaming) port: </span>8089  <span className="text-slate-500">(TLS)</span></div>
+          <div><span className="text-slate-500">Enrollment port: </span>8446</div>
+          <div><span className="text-slate-500">Username / token: </span>{enrollUser} / (your enrollment password)</div>
+          <div><span className="text-slate-500">Admin web UI: </span>https://{enrollHost || '192.168.0.198'}:8443 <span className="text-slate-500">(needs admin cert)</span></div>
         </div>
-        <div className="flex flex-col md:flex-row gap-5 items-start">
-          <div className="flex-1 space-y-2">
-            <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
-              ⤓ Download Connection Package (.zip)
-            </button>
-            {qrErr && <p className="text-xs text-red-400">{qrErr}</p>}
-            <p className="text-xs text-slate-500">
-              Two ways to get this onto your device, then <strong>Share → ATAK/iTAK</strong> to import the secure connection:
-              <br />
-              <strong>1. File:</strong> download <span className="font-mono">MeshBridge.zip</span> and AirDrop/email it to your phone.
-              <br />
-              <strong>2. QR:</strong> scan it with the phone's <strong>Camera app</strong> → open the link → it downloads the package.
-              <br />
-              <em>Note:</em> don't use iTAK's built-in QR scanner — it only accepts TAK enrollment QRs, which FreeTAKServer doesn't provide.
-              Host is pre-filled from how you reached this page; change it to your Tailscale IP for remote use.
-            </p>
-          </div>
-
-          {qrDataUrl && (
-            <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
-              <img src={qrDataUrl} alt="Scan with phone camera to download the TAK connection package" width={220} height={220} />
-              <span className="text-xs text-slate-700 mt-1 font-medium text-center">📷 Scan with phone <strong>Camera</strong><br/>to download the package</span>
-            </div>
-          )}
-        </div>
+        <p className="text-xs text-slate-500">
+          In ATAK: Settings → Network Preferences → Manage Server Connections → add server, enable
+          <strong> "Enroll for client certificate"</strong>, host {enrollHost || '192.168.0.198'}, then sign in with the username/token.
+        </p>
       </div>
 
       <div className="card p-4 bg-blue-500/10 border border-blue-500/30">
         <p className="text-xs text-blue-200">
-          <strong>Multicast vs. server:</strong> LAN multicast needs no server but only works on the same subnet.
-          The TAK server (TCP/TLS) path works remotely (e.g. over Tailscale) and is what the connection package uses.
+          <strong>Multicast vs. server:</strong> LAN multicast (above) needs no server but only works on the same subnet.
+          The TAK Server path (TLS, with enrollment) is what reaches remote clients — e.g. over Tailscale, where you'd
+          use your tailnet IP/host instead of {enrollHost || '192.168.0.198'}.
         </p>
       </div>
     </div>
