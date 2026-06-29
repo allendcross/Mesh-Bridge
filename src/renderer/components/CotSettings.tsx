@@ -42,6 +42,16 @@ export default function CotSettings() {
   const [form, setForm] = useState<CotForm>(DEFAULTS);
   const [saved, setSaved] = useState(false);
 
+  // TAK client connection package — default the host to however the user reached this GUI
+  // (their LAN IP, or their Tailscale hostname), which is exactly what the phone should use.
+  const [takHost, setTakHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
+  const [takPort, setTakPort] = useState(8089);
+
+  const downloadPackage = () => {
+    if (!takHost) return;
+    window.location.href = `/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`;
+  };
+
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
 
@@ -166,10 +176,43 @@ export default function CotSettings() {
         {saved && <span className="text-sm text-green-400">✓ Saved — applied to the live feed.</span>}
       </div>
 
+      {/* TAK client connection package */}
+      <div className="card p-6 space-y-3">
+        <h3 className="text-lg font-bold text-white">📲 Connect a TAK client (iTAK / ATAK)</h3>
+        <p className="text-sm text-slate-400">
+          Generate a connection data package from FreeTAKServer's certificates. Import it into iTAK/ATAK and it
+          configures a secure (TLS) server connection automatically — no username/password enrollment needed.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-slate-300 mb-1">Server host/IP (reachable by the phone)</label>
+            <input
+              type="text"
+              value={takHost}
+              onChange={(e) => setTakHost(e.target.value)}
+              placeholder="192.168.0.198 (LAN) or your Tailscale IP"
+              className="input w-full font-mono text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">TLS port</label>
+            <input type="number" value={takPort} onChange={(e) => setTakPort(parseInt(e.target.value) || 8089)} className="input w-full" />
+          </div>
+        </div>
+        <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
+          ⤓ Download Connection Package (.zip)
+        </button>
+        <p className="text-xs text-slate-500">
+          AirDrop / email the downloaded <span className="font-mono">MeshBridge.zip</span> to your device, then import it in iTAK/ATAK.
+          The host is pre-filled with however you reached this page; change it to your Tailscale IP for remote use.
+          Requires FreeTAKServer (certs at <span className="font-mono">/opt/freetakserver/data/certs</span>).
+        </p>
+      </div>
+
       <div className="card p-4 bg-blue-500/10 border border-blue-500/30">
         <p className="text-xs text-blue-200">
-          <strong>Connecting a TAK client:</strong> point ATAK/iTAK at the TAK server's host on its CoT port (TCP 8087 by default).
-          On the LAN use this machine's IP; remotely, use its Tailscale address. Multicast (LAN) needs no server but only works on the same subnet.
+          <strong>Multicast vs. server:</strong> LAN multicast needs no server but only works on the same subnet.
+          The TAK server (TCP/TLS) path works remotely (e.g. over Tailscale) and is what the connection package uses.
         </p>
       </div>
     </div>

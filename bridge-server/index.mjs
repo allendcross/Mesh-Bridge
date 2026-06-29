@@ -30,6 +30,7 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import { AdsbService } from './services/AdsbService.mjs';
 import { CotService } from './services/CotService.mjs';
+import { buildTakDataPackage } from './services/TakPackageService.mjs';
 import fetch from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
@@ -224,6 +225,7 @@ class MeshtasticBridgeServer {
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
     this.cotTcpPort = 8087;                  // FreeTAKServer CoT streaming port
     this.cotService = null;                  // CotService instance
+    this.takCertsPath = '/opt/freetakserver/data/certs'; // TAK server certs (for client data packages)
 
     // ===== PORT EXCLUSION CONFIGURATION =====
     // Ports to exclude from bridge usage (persists across reboots)
@@ -461,6 +463,7 @@ class MeshtasticBridgeServer {
           if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
           if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
           if (config.cot.tcpPort !== undefined) this.cotTcpPort = config.cot.tcpPort;
+          if (config.cot.certsPath) this.takCertsPath = config.cot.certsPath;
           console.log(`📋 Loaded CoT/TAK config: ${this.cotEnabled ? 'ENABLED' : 'DISABLED'}${this.cotTcpHost ? ` (TCP feed → ${this.cotTcpHost}:${this.cotTcpPort})` : ''}`);
         }
 
@@ -557,7 +560,8 @@ class MeshtasticBridgeServer {
           teamColor: this.cotTeamColor,
           multicastEnabled: this.cotMulticastEnabled,
           tcpHost: this.cotTcpHost,
-          tcpPort: this.cotTcpPort
+          tcpPort: this.cotTcpPort,
+          certsPath: this.takCertsPath
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -584,6 +588,33 @@ class MeshtasticBridgeServer {
         res.end(JSON.stringify(versionInfo));
         return true;
       } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+        return true;
+      }
+    }
+
+    // TAK client connection data package (ATAK/iTAK)
+    if (url.pathname === '/api/tak-datapackage' && req.method === 'GET') {
+      try {
+        const host = url.searchParams.get('host');
+        const port = parseInt(url.searchParams.get('port') || '8089');
+        const name = (url.searchParams.get('name') || 'MeshBridge').replace(/[^A-Za-z0-9_-]/g, '') || 'MeshBridge';
+        if (!host) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'host query parameter is required' }));
+          return true;
+        }
+        const buf = await buildTakDataPackage({ certsPath: this.takCertsPath, host, port, name });
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${name}.zip"`,
+          'Content-Length': buf.length,
+        });
+        res.end(buf);
+        return true;
+      } catch (error) {
+        console.error('❌ TAK data package error:', error.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: error.message }));
         return true;
