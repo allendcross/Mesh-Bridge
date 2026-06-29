@@ -19,6 +19,7 @@ function App() {
   const messages = useStore(state => state.messages);
   const nodes = useStore(state => state.nodes);
   const aircraft = useStore(state => state.aircraft);
+  const takContacts = useStore(state => state.takContacts);
   const stationLocation = useStore(state => state.stationLocation);
   const bridgeConfig = useStore(state => state.bridgeConfig);
   const bridgeConnected = useStore(state => state.bridgeConnected);
@@ -78,7 +79,7 @@ function App() {
       case 'messages':
         return { messages, radios };
       case 'tactical':
-        return { nodes, radios, aircraft, stationLocation };
+        return { nodes, radios, aircraft, takContacts, stationLocation };
       case 'siteplanner':
         return {};
       case 'networkhealth':

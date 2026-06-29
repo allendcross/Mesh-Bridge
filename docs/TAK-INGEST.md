@@ -1,6 +1,22 @@
 # TAK Ingest — Inbound CoT for a Common Operating Picture
 
-**Status:** Phase 1 (backend ingest) ✅ COMPLETE — Phases 2–5 pending.
+**Status:** Phases 1–2 ✅ COMPLETE — Phases 3–5 pending.
+
+## Phase 2 — done (frontend contacts + markers)
+
+Verified: ChopsTrop/ChopsWinTAK appear as TAK contacts on `TacticalView`.
+- `types.ts` — `TakContact` / `TakChatMessage`.
+- `webSocketManager.ts` — handle `tak-update`/`tak-remove`/`tak-chat`, emit events.
+- `useStore.ts` — uid-keyed `takContacts` map (upsert/remove) + `takChat`, swept
+  every 15s by CoT `stale` time (fallback 10 min). `App.tsx` passes `takContacts`
+  to the tactical tab.
+- `TacticalView.tsx` — TAK markers on the map (team-colored circle for contacts,
+  amber diamond for markers) + popups + the sidebar **TAK** source bucket/filter.
+- **Op note:** only ONE connection may use the `meshbridge-monitor` cert at a time
+  — duplicate identities make TAK Server deliver to just one (don't run a manual
+  `openssl` capture with that cert while the bridge ingest is live).
+
+Phases 3–5 remaining: drawings/shapes geometry, GeoChat panel, settings card.
 
 ## Phase 1 — done (backend ingest)
 

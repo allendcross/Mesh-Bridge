@@ -3,15 +3,26 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { forward as mgrsForward, toPoint as mgrsToPoint } from 'mgrs';
-import { MeshNode, Radio, Aircraft, StationLocation } from '../types';
+import { MeshNode, Radio, Aircraft, TakContact, StationLocation } from '../types';
 import { useStore } from '../store/useStore';
 
 interface TacticalViewProps {
   nodes: MeshNode[];
   radios: Radio[];
   aircraft?: Aircraft[];
+  takContacts?: TakContact[];
   stationLocation?: StationLocation | null;
 }
+
+// ATAK standard team colors → hex (for TAK contact markers).
+const TAK_TEAM_COLORS: Record<string, string> = {
+  White: '#f8fafc', Yellow: '#facc15', Orange: '#fb923c', Magenta: '#f472b6',
+  Red: '#ef4444', Maroon: '#b91c1c', Purple: '#a855f7', 'Dark Blue': '#1d4ed8',
+  Blue: '#3b82f6', Cyan: '#22d3ee', Teal: '#14b8a6', Green: '#22c55e',
+  'Dark Green': '#15803d', Brown: '#92400e',
+};
+const takColor = (c: TakContact): string =>
+  c.kind === 'marker' ? '#f59e0b' : (TAK_TEAM_COLORS[c.team || ''] || '#a855f7');
 
 // ~40 mile view radius for the initial auto-center (80 mile / 128.7 km square).
 const STATION_VIEW_METERS = 80 * 1609.34;
@@ -134,7 +145,7 @@ interface AircraftTrail {
   positions: Array<{ lat: number; lon: number; t: number }>;
 }
 
-export default function TacticalView({ nodes, radios, aircraft = [], stationLocation }: TacticalViewProps) {
+export default function TacticalView({ nodes, radios, aircraft = [], takContacts: takTracks = [], stationLocation }: TacticalViewProps) {
   const [showSidebar, setShowSidebar] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<'all' | ContactSource>('all');
   const [contactSearch, setContactSearch] = useState('');
@@ -368,10 +379,36 @@ All devices must use the EXACT same PSK and channel index.`;
     });
   };
 
+  // Inbound TAK track marker: circle for live contacts, amber diamond for dropped
+  // markers, colored by ATAK team. Callsign label below.
+  const createTakIcon = (c: TakContact) => {
+    const color = takColor(c);
+    const label = String(c.callsign || c.uid).replace(/[<>]/g, '');
+    const shape = c.kind === 'marker'
+      ? `<div style="width:13px;height:13px;background:${color};border:1.5px solid #0f172a;transform:rotate(45deg);box-shadow:0 1px 2px rgba(0,0,0,0.6);"></div>`
+      : `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #0f172a;box-shadow:0 1px 2px rgba(0,0,0,0.6);"></div>`;
+    return L.divIcon({
+      html: `
+        <div style="position:relative;text-align:center;">
+          ${shape}
+          <div style="position:absolute;top:15px;left:50%;transform:translateX(-50%);
+               background:rgba(15,23,42,0.85);color:${color};padding:1px 4px;border-radius:3px;
+               font-size:9px;font-weight:700;white-space:nowrap;line-height:1.1;">${label}</div>
+        </div>`,
+      className: '',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+  };
+
   const nodesWithPosition = nodes.filter(n => n.position);
   // Only show fresh, positioned aircraft (server already filters; this guards the UI too).
   const visibleAircraft = aircraft.filter(
     a => typeof a.lat === 'number' && typeof a.lon === 'number' && (a.seenPos ?? 0) <= AIRCRAFT_STALE_SEC
+  );
+  // Positioned TAK contacts + markers (drawings rendered separately in a later phase).
+  const visibleTakTracks = takTracks.filter(
+    c => c.kind !== 'drawing' && typeof c.lat === 'number' && typeof c.lon === 'number'
   );
   const defaultCenter: [number, number] = nodesWithPosition.length > 0
     ? [nodesWithPosition[0].position!.latitude, nodesWithPosition[0].position!.longitude]
@@ -449,8 +486,20 @@ All devices must use the EXACT same PSK and channel index.`;
     lon: ac.lon,
   }));
 
-  // TAK/CoT tracks are not ingested yet — reserved bucket for the future TAK feed.
-  const takContacts: Contact[] = [];
+  // Inbound TAK tracks (contacts, markers) from the TAK Server CoT stream.
+  const takContacts: Contact[] = takTracks
+    .filter(c => typeof c.lat === 'number' && typeof c.lon === 'number')
+    .map(c => ({
+      id: `tak-${c.uid}`,
+      source: 'tak' as const,
+      name: c.callsign,
+      sub: `${c.kind.toUpperCase()}${c.team ? ` • ${c.team}` : ''}`,
+      meta: c.kind === 'contact' ? (c.platform || 'TAK') : (c.remarks || c.cotType),
+      color: takColor(c),
+      hasPosition: true,
+      lat: c.lat,
+      lon: c.lon,
+    }));
 
   const allContacts = [...meshContacts, ...adsbContacts, ...takContacts];
   const counts = {
@@ -1119,6 +1168,38 @@ All devices must use the EXACT same PSK and channel index.`;
                     {ac.seenPos !== undefined && (
                       <div><strong>Position Age:</strong> {ac.seenPos.toFixed(1)}s</div>
                     )}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+          {/* Inbound TAK tracks (other TAK clients' positions + dropped markers) */}
+          {visibleTakTracks.map(c => (
+            <Marker
+              key={`tak-${c.uid}`}
+              position={[c.lat as number, c.lon as number]}
+              icon={createTakIcon(c)}
+            >
+              <Popup>
+                <div className="min-w-[200px]">
+                  <h3 className="font-bold text-lg mb-2">
+                    {c.callsign}
+                    <span className="ml-2 text-xs uppercase text-purple-600">{c.kind}</span>
+                  </h3>
+                  <div className="text-sm space-y-1">
+                    <div><strong>Source:</strong> TAK ({c.cotType})</div>
+                    {c.team && <div><strong>Team:</strong> {c.team}{c.role ? ` • ${c.role}` : ''}</div>}
+                    {c.platform && <div><strong>Platform:</strong> {c.platform}</div>}
+                    <div><strong>Position:</strong> {(c.lat as number).toFixed(5)}, {(c.lon as number).toFixed(5)}</div>
+                    {typeof c.speed === 'number' && c.speed > 0 && (
+                      <div><strong>Speed:</strong> {(c.speed * 1.94384).toFixed(0)} kt</div>
+                    )}
+                    {typeof c.course === 'number' && (
+                      <div><strong>Course:</strong> {Math.round(c.course)}°</div>
+                    )}
+                    {c.remarks && <div><strong>Remarks:</strong> {c.remarks}</div>}
+                    {c.stale && <div><strong>Stale:</strong> {new Date(c.stale).toLocaleTimeString()}</div>}
                   </div>
                 </div>
               </Popup>

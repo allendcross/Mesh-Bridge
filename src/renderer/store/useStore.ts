@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { WebSocketRadioManager } from '../lib/webSocketManager';
-import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot, Aircraft, StationLocation } from '../types';
+import type { Radio, Statistics, LogEntry, BridgeConfig, Message, AIConfig, AIModel, AIStatus, AIModelPullProgress, CommunicationConfig, EmailConfig, DiscordConfig, MQTTConfig, AdvertisementBotConfig, MeshNode, TelemetrySnapshot, Aircraft, TakContact, TakChatMessage, StationLocation } from '../types';
 
 interface AppStore {
   // Manager instance
@@ -15,6 +15,8 @@ interface AppStore {
   messages: Message[];
   nodes: MeshNode[];
   aircraft: Aircraft[]; // ADS-B aircraft (ephemeral, snapshot-replaced, NOT persisted)
+  takContacts: TakContact[]; // inbound TAK tracks (contacts/markers/drawings), uid-keyed, stale-expired
+  takChat: TakChatMessage[]; // inbound GeoChat messages (ephemeral)
   stationLocation: StationLocation | null; // server/relay location for map auto-center
   cotConfig: any | null; // CoT/TAK output config
   adsbConfig: any | null; // ADS-B feed config
@@ -238,6 +240,34 @@ export const useStore = create<AppStore>((set, get) => {
     set({ aircraft });
   });
 
+  // ===== Inbound TAK tracks (CotIngestService → bridge WS) =====
+  // uid-keyed so updates replace and deletes remove; swept by CoT stale time.
+  const takContactMap = new Map<string, TakContact>();
+  const flushTak = () => set({ takContacts: Array.from(takContactMap.values()) });
+
+  manager.on('tak-update', (c: TakContact) => {
+    takContactMap.set(c.uid, { ...c, updatedAt: Date.now() });
+    flushTak();
+  });
+  manager.on('tak-remove', (uid: string) => {
+    if (takContactMap.delete(uid)) flushTak();
+  });
+  manager.on('tak-chat', (chat: TakChatMessage) => {
+    set(state => ({ takChat: [...state.takChat, { ...chat, receivedAt: Date.now() }].slice(-200) }));
+  });
+
+  // Expire stale TAK tracks. CoT carries a `stale` time (~5 min for contacts);
+  // fall back to 10 min since last update if absent. Sweep every 15s.
+  setInterval(() => {
+    const now = Date.now();
+    let changed = false;
+    for (const [uid, c] of takContactMap) {
+      const staleMs = c.stale ? Date.parse(c.stale) : (c.updatedAt + 10 * 60 * 1000);
+      if (Number.isFinite(staleMs) && now > staleMs) { takContactMap.delete(uid); changed = true; }
+    }
+    if (changed) flushTak();
+  }, 15000);
+
   // Server/relay location for map auto-center
   manager.on('station-location', (loc: StationLocation) => {
     set({ stationLocation: loc });
@@ -310,6 +340,8 @@ export const useStore = create<AppStore>((set, get) => {
     messages: [],
     nodes: [],
     aircraft: [],
+    takContacts: [],
+    takChat: [],
     stationLocation: null,
     cotConfig: null,
     adsbConfig: null,

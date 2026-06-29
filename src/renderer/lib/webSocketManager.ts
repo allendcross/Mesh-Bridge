@@ -510,6 +510,21 @@ export class WebSocketRadioManager {
         });
         break;
 
+      case 'tak-update':
+        // Inbound TAK track (contact/marker/drawing) from CotIngestService.
+        if (data.contact) this.emit('tak-update', data.contact);
+        break;
+
+      case 'tak-remove':
+        // A TAK client deleted a track (CoT t-x-d-d).
+        if (data.uid) this.emit('tak-remove', data.uid);
+        break;
+
+      case 'tak-chat':
+        // Inbound GeoChat message.
+        if (data.chat) this.emit('tak-chat', data.chat);
+        break;
+
       case 'message':
         // New message received (or sent by us)
         console.log('[DEBUG] Raw message data from backend:', {

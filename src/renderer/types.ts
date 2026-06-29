@@ -147,6 +147,37 @@ export interface Aircraft {
   emergency?: boolean;     // squawk is 7500/7600/7700
 }
 
+// Inbound TAK track (other TAK clients' positions, markers, drawings) ingested
+// from the TAK Server's CoT stream by the bridge's CotIngestService.
+export interface TakContact {
+  uid: string;
+  source: 'tak';
+  kind: 'contact' | 'marker' | 'drawing';
+  cotType: string;          // raw CoT type (e.g. a-f-G-U-C-I)
+  callsign: string;
+  lat?: number;
+  lon?: number;
+  team?: string;            // ATAK team color (Cyan, Magenta, Maroon, …)
+  role?: string;            // ATAK role (Team Member, HQ, …)
+  course?: number;          // degrees (contacts w/ <track>)
+  speed?: number;           // m/s
+  platform?: string;        // ATAK/WinTAK/iTAK (contacts w/ <takv>)
+  remarks?: string;
+  stale?: string;           // ISO time the track expires
+  points?: [number, number][]; // drawings only — polyline/polygon vertices
+  updatedAt: number;        // client receive time (ms)
+}
+
+// Inbound GeoChat message (CoT type b-t-f).
+export interface TakChatMessage {
+  uid: string;
+  room: string;
+  sender: string;
+  text: string;
+  time: string;             // ISO from the event
+  receivedAt: number;       // client receive time (ms)
+}
+
 // Server/relay location used to auto-center the Tactical map.
 export interface StationLocation {
   lat: number;
