@@ -1,6 +1,36 @@
 # TAK Ingest — Inbound CoT for a Common Operating Picture
 
 **Status:** Planned (design)
+
+## Quick start for the implementation session
+
+Start at **Phase 1** below. Concrete first steps:
+
+1. **Mint the monitor cert** (one-time, on the host — same pattern that worked for
+   ChopsTrop / ChopsWinTAK):
+   ```bash
+   sudo docker run --rm --entrypoint bash \
+     -e STATE=Nevada -e CITY=LasVegas -e ORGANIZATIONAL_UNIT=MeshBridge -e CAPASS=atakatak -e PASS=atakatak \
+     -v /opt/takserver/tak:/opt/tak -w /opt/tak/certs takserver:5.7 \
+     -c "./makeCert.sh client meshbridge-monitor"
+   sudo docker exec takserver bash -c 'cd /opt/tak && java -jar utils/UserManager.jar certmod certs/files/meshbridge-monitor.pem'
+   ```
+   Cert lands at `/opt/takserver/tak/certs/files/meshbridge-monitor.{pem,key}` in `__ANON__`.
+2. **Build `CotIngestService.mjs`** (Node `tls.connect` to `127.0.0.1:8089`, send an
+   identity CoT, buffer + split on `</event>`, parse/classify, drop `meshtastic-*`/
+   `adsb-*`). Reference: `CotService.mjs` for the reconnect/queue patterns.
+3. **Live test data already exists** — these clients are connected and broadcasting,
+   so the ingest can be verified immediately against real traffic:
+   - `ChopsTrop` (iPhone/TROP, team Magenta) — position updates
+   - `ChopsWinTAK` (Windows/WinTAK, team Maroon) — position updates
+   - `WebTAK` (team Cyan)
+   - A dropped **marker "Walmart Evil HQ"** (`b-m-p-*`) to confirm marker parsing
+   - Drop a **GeoChat** from any client to confirm `b-t-f` parsing
+4. Sanity-check the raw stream first with the admin cert (proves what XML to parse):
+   `( printf '<identity cot>\n'; sleep 10 ) | sudo openssl s_client -connect 127.0.0.1:8089 -cert /opt/takserver/tak/certs/files/admin.pem -key …/admin.key -pass pass:atakatak -quiet`
+
+---
+
 **Goal:** Make the bridge a *bidirectional* TAK client. Today it only **feeds** CoT
 to the TAK Server (mesh nodes + ADS-B aircraft, via the 8087 anonymous input). This
 feature adds the **inbound** half: the bridge **subscribes** to the TAK Server's CoT
