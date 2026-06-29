@@ -24,6 +24,8 @@ export class WebSocketRadioManager {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectDelay = 2000;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPongAt = 0;
   private bridgeUrl: string;
   private readonly MESSAGE_STORAGE_KEY = 'mesh-bridge-messages';
   private readonly NODE_STORAGE_KEY = 'mesh-bridge-nodes';
@@ -178,6 +180,33 @@ export class WebSocketRadioManager {
   }
 
   /**
+   * Application-level keepalive. Browsers/proxies/NAT silently drop idle
+   * WebSockets after a few minutes; without this the connection dies and the
+   * onclose-driven reconnect is the only recovery. We ping every 25s and, if no
+   * pong comes back for ~70s, force-close so the reconnect logic kicks in.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastPongAt > 70000) {
+        this.log('warn', 'No pong from bridge in 70s — closing to force reconnect');
+        try { this.ws.close(); } catch { /* ignore */ }
+        return;
+      }
+      try { this.ws.send(JSON.stringify({ type: 'ping' })); } catch { /* ignore */ }
+    }, 25000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /**
    * Connect to the bridge server
    */
   async connectToBridge(): Promise<{ success: boolean; error?: string }> {
@@ -190,6 +219,10 @@ export class WebSocketRadioManager {
         this.ws.onopen = () => {
           this.log('info', '✅ Connected to bridge server');
           this.reconnectAttempts = 0;
+          // Notify the store on EVERY (re)connect so the UI recovers without a
+          // page refresh — not just on the initial connectToBridge() call.
+          this.emit('bridge-connected');
+          this.startHeartbeat();
           resolve({ success: true });
         };
 
@@ -209,6 +242,7 @@ export class WebSocketRadioManager {
 
         this.ws.onclose = () => {
           this.log('warn', 'Bridge server connection closed');
+          this.stopHeartbeat();
           this.emit('bridge-disconnected');
 
           // Attempt reconnect if configured
@@ -580,7 +614,8 @@ export class WebSocketRadioManager {
         break;
 
       case 'pong':
-        // Ping response
+        // Ping response — proves the connection is alive.
+        this.lastPongAt = Date.now();
         break;
 
       case 'ai-config':

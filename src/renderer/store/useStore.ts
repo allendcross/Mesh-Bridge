@@ -24,6 +24,7 @@ interface AppStore {
   // Auto-scan state
   autoScanEnabled: boolean;
   autoScanInterval: number; // milliseconds
+  scanning: boolean; // true only while a scan is actively in flight
   lastScan: Date | null;
 
   // AI State
@@ -256,6 +257,14 @@ export const useStore = create<AppStore>((set, get) => {
     set({ bridgeConnected: false });
   });
 
+  // Fired on every (re)connect by the manager's onopen — this is what lets the
+  // UI recover after an auto-reconnect without a manual page refresh.
+  manager.on('bridge-connected', () => {
+    set({ bridgeConnected: true });
+    manager.requestStationLocation();
+    manager.requestCotConfig();
+  });
+
   // AI event listeners
   manager.on('ai-config-update', (config: AIConfig) => {
     set({ aiConfig: config });
@@ -308,6 +317,7 @@ export const useStore = create<AppStore>((set, get) => {
     telemetryHistory: new Map(),
     autoScanEnabled: false,
     autoScanInterval: 30000, // 30 seconds default
+    scanning: false,
     lastScan: null,
     aiConfig: null,
     aiModels: [],
@@ -355,7 +365,9 @@ export const useStore = create<AppStore>((set, get) => {
           return;
         }
 
-        set({ lastScan: new Date() });
+        // Mark scanning so the UI can show the spinner ONLY during the actual
+        // scan, not for the whole 30s idle gap between scans.
+        set({ scanning: true, lastScan: new Date() });
 
         const ports = await manager.scanForRadios();
 
@@ -377,6 +389,8 @@ export const useStore = create<AppStore>((set, get) => {
         );
       } catch (error) {
         // Don't throw - we don't want auto-scan errors to crash the app
+      } finally {
+        set({ scanning: false });
       }
     },
 

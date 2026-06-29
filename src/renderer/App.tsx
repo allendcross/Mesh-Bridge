@@ -23,6 +23,7 @@ function App() {
   const bridgeConfig = useStore(state => state.bridgeConfig);
   const bridgeConnected = useStore(state => state.bridgeConnected);
   const autoScanEnabled = useStore(state => state.autoScanEnabled);
+  const scanning = useStore(state => state.scanning);
   const lastScan = useStore(state => state.lastScan);
   const initialize = useStore(state => state.initialize);
   const connectToBridge = useStore(state => state.connectToBridge);
@@ -151,22 +152,30 @@ function App() {
           {bridgeConnected && (
             <div className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
               <div className="flex items-center gap-2 mb-1">
-                {autoScanEnabled ? (
+                {!autoScanEnabled ? (
+                  <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ) : scanning ? (
                   <svg className="w-3 h-3 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                 ) : (
-                  <svg className="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 )}
                 <span className="text-xs font-medium text-blue-300">
-                  {autoScanEnabled ? 'Auto-Scanning' : 'Auto-Scan Paused'}
+                  {!autoScanEnabled ? 'Auto-Scan Paused' : scanning ? 'Scanning…' : 'Auto-Scan On'}
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                {autoScanEnabled ? `Last: ${getTimeSinceLastScan()}` : 'Radios detected automatically'}
+                {!autoScanEnabled
+                  ? 'Radios detected automatically'
+                  : scanning
+                    ? 'Checking for new radios…'
+                    : `Idle • last scan ${getTimeSinceLastScan()}`}
               </p>
             </div>
           )}
