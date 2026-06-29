@@ -226,7 +226,7 @@ class MeshtasticBridgeServer {
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
     this.cotTcpPort = 8087;                  // FreeTAKServer CoT streaming port
     this.cotService = null;                  // CotService instance
-    this.takCertsPath = '/opt/freetakserver/data/certs'; // TAK server certs (for client data packages)
+    this.takCertsPath = '/opt/takserver/tak/certs/files'; // TAK server certs (for client data packages)
     this.takPackageCache = new Map(); // hash -> { buf, name } for ATAK QR (Marti sync) import
 
     // ===== PORT EXCLUSION CONFIGURATION =====

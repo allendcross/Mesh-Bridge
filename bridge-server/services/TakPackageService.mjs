@@ -62,6 +62,7 @@ export async function buildTakDataPackage(opts) {
   const port = opts.port || 8089;
   const name = (opts.name || 'MeshBridge').replace(/[^A-Za-z0-9_-]/g, '');
   const p12pw = opts.p12Password || 'atakatak';
+  const keyPass = opts.keyPass || 'atakatak'; // passphrase on the source client key (TAK Server encrypts it)
 
   if (!host) throw new Error('host is required');
 
@@ -83,10 +84,12 @@ export async function buildTakDataPackage(opts) {
     // Compatibility PBE flags (SHA1/3DES) — what ATAK/BouncyCastle expects.
     const pbe = ['-certpbe', 'PBE-SHA1-3DES', '-keypbe', 'PBE-SHA1-3DES', '-macalg', 'sha1'];
 
-    // Client cert bundle (cert + key + CA chain)
+    // Client cert bundle (cert + key + CA chain). -passin handles an encrypted
+    // source key (TAK Server protects client keys; harmless if the key is plaintext).
     await execFile('openssl', [
-      'pkcs12', '-export', '-in', clientPem, '-inkey', clientKey, '-certfile', caPem,
-      '-name', name, '-out', join(work, 'clientCert.p12'), '-passout', `pass:${p12pw}`, ...pbe,
+      'pkcs12', '-export', '-in', clientPem, '-inkey', clientKey, '-passin', `pass:${keyPass}`,
+      '-certfile', caPem, '-name', name, '-out', join(work, 'clientCert.p12'),
+      '-passout', `pass:${p12pw}`, ...pbe,
     ]);
 
     // CA truststore (CA cert only, no key)

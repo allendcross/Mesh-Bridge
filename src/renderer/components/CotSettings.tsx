@@ -51,6 +51,14 @@ export default function CotSettings() {
   const [enrollToken, setEnrollToken] = useState('');
   const [enrollQr, setEnrollQr] = useState('');
 
+  // Data package (the ONLY way to connect iTAK/iOS — it has no cert enrollment).
+  const [pkgHost, setPkgHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
+  const [pkgPort, setPkgPort] = useState(8089);
+  const downloadPackage = () => {
+    if (!pkgHost) return;
+    window.location.href = `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(pkgHost)}&port=${pkgPort}&name=MeshBridge`;
+  };
+
   useEffect(() => {
     if (!enrollHost || !enrollUser || !enrollToken) { setEnrollQr(''); return; }
     const url = `tak://com.atakmap.app/enroll?host=${encodeURIComponent(enrollHost)}&username=${encodeURIComponent(enrollUser)}&token=${encodeURIComponent(enrollToken)}`;
@@ -181,12 +189,37 @@ export default function CotSettings() {
         {saved && <span className="text-sm text-green-400">✓ Saved — applied to the live feed.</span>}
       </div>
 
-      {/* Native enrollment QR (official TAK Server) */}
+      {/* Data package — the iTAK path (iOS has no enrollment) */}
       <div className="card p-6 space-y-3 border border-green-500/30">
-        <h3 className="text-lg font-bold text-white">⚡ ATAK / iTAK Quick-Connect (Enrollment QR)</h3>
+        <h3 className="text-lg font-bold text-white">📲 iTAK / ATAK — Connection Package (recommended)</h3>
         <p className="text-sm text-slate-400">
-          Scan this with iTAK/ATAK's <strong>built-in QR scanner</strong> (Settings → scan) — it enrolls over TLS using the
-          username/password, downloads a client certificate automatically, and connects. No file import.
+          Download a data package (CA + client certificate + connection profile) and import it. This is the
+          <strong> only way to connect iTAK (iOS)</strong>, and works for ATAK too — no enrollment needed.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-2">
+            <label className="block text-xs text-slate-400 mb-1">Server host/IP (reachable by the phone)</label>
+            <input type="text" value={pkgHost} onChange={(e) => setPkgHost(e.target.value)} placeholder="192.168.0.198 (LAN) or Tailscale IP" className="input w-full text-sm font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">CoT TLS port</label>
+            <input type="number" value={pkgPort} onChange={(e) => setPkgPort(parseInt(e.target.value) || 8089)} className="input w-full text-sm" />
+          </div>
+        </div>
+        <button onClick={downloadPackage} disabled={!pkgHost} className="btn-primary disabled:opacity-50">⤓ Download Connection Package (.zip)</button>
+        <p className="text-xs text-slate-500">
+          Get <span className="font-mono">MeshBridge.zip</span> onto the phone (AirDrop / email / Files), then open it →
+          <strong> Share → iTAK</strong> (or ATAK) → it imports the certs and the secure server connection automatically.
+          Built from the TAK Server CA at <span className="font-mono">/opt/takserver/tak/certs/files</span>.
+        </p>
+      </div>
+
+      {/* Native enrollment QR — ATAK (Android) only */}
+      <div className="card p-6 space-y-3">
+        <h3 className="text-lg font-bold text-white">⚡ ATAK (Android) Quick-Connect — Enrollment QR</h3>
+        <p className="text-sm text-slate-400">
+          <strong>ATAK only.</strong> Scan with ATAK's built-in QR scanner to enroll with username/password over TLS and
+          auto-download a cert. <em>iTAK (iOS) does not support enrollment</em> — use the connection package above instead.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
