@@ -152,7 +152,7 @@ export class CotService {
 
   /** Publish a single mesh node (must have a position). */
   publishNode(node) {
-    if (!this.opts.enabled || !this.opts.publishNodes || !this.socket) return;
+    if (!this.opts.enabled || !this.opts.publishNodes) return;
     if (!node.position || typeof node.position.latitude !== 'number') return;
     const callsign = `${this.opts.callsignPrefix || ''}${node.shortName || node.longName || node.nodeId}`;
     this.send(this.buildEvent({
@@ -170,7 +170,7 @@ export class CotService {
 
   /** Publish a batch of ADS-B aircraft. */
   publishAircraft(list) {
-    if (!this.opts.enabled || !this.opts.publishAircraft || !this.socket) return;
+    if (!this.opts.enabled || !this.opts.publishAircraft) return;
     for (const ac of list || []) {
       if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue;
       this.send(this.buildEvent({
