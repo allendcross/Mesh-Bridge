@@ -40,6 +40,10 @@ export default function CotSettings() {
   const getCotConfig = useStore(state => state.getCotConfig);
   const setCotConfig = useStore(state => state.setCotConfig);
 
+  const takIngestConfig = useStore(state => state.takIngestConfig);
+  const getTakIngestConfig = useStore(state => state.getTakIngestConfig);
+  const setTakIngestConfig = useStore(state => state.setTakIngestConfig);
+
   const [form, setForm] = useState<CotForm>(DEFAULTS);
   const [saved, setSaved] = useState(false);
 
@@ -69,6 +73,19 @@ export default function CotSettings() {
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
 
   const update = (patch: Partial<CotForm>) => setForm(prev => ({ ...prev, ...patch }));
+
+  // ===== TAK Ingest (inbound CoT — the monitoring map's common operating picture) =====
+  const INGEST_DEFAULTS = { enabled: false, host: '192.168.0.198', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
+  const [ingest, setIngest] = useState<typeof INGEST_DEFAULTS>(INGEST_DEFAULTS);
+  const [ingestSaved, setIngestSaved] = useState(false);
+  useEffect(() => { getTakIngestConfig(); }, [getTakIngestConfig]);
+  useEffect(() => { if (takIngestConfig) setIngest(prev => ({ ...prev, ...takIngestConfig })); }, [takIngestConfig]);
+  const updateIngest = (patch: Partial<typeof INGEST_DEFAULTS>) => setIngest(prev => ({ ...prev, ...patch }));
+  const handleIngestSave = () => {
+    setTakIngestConfig(ingest);
+    setIngestSaved(true);
+    setTimeout(() => setIngestSaved(false), 2500);
+  };
 
   const handleSave = () => {
     setCotConfig(form);
@@ -187,6 +204,54 @@ export default function CotSettings() {
       <div className="flex items-center gap-3">
         <button onClick={handleSave} className="btn-primary">💾 Save TAK Feed Settings</button>
         {saved && <span className="text-sm text-green-400">✓ Saved — applied to the live feed.</span>}
+      </div>
+
+      {/* TAK Ingest / Monitor — inbound CoT (the reverse direction of the feed above) */}
+      <div className={`card p-6 space-y-4 ${ingest.enabled ? 'border border-purple-500/40' : 'border border-slate-600'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white">🛰️ TAK Ingest (Monitor)</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Subscribe to the TAK Server and show other clients' positions, markers, drawings, and GeoChat
+              on the Tactical map. Needs a client cert (<span className="font-mono">{ingest.certName}</span>) registered on the server.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 flex-shrink-0">
+            <span className={`text-sm font-medium ${ingest.enabled ? 'text-purple-300' : 'text-slate-400'}`}>{ingest.enabled ? 'On' : 'Off'}</span>
+            <input type="checkbox" checked={ingest.enabled} onChange={(e) => updateIngest({ enabled: e.target.checked })}
+              className="w-5 h-5 text-purple-600 bg-slate-700 border-slate-600 rounded focus:ring-purple-500" />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="col-span-2">
+            <label className="block text-xs text-slate-400 mb-1">TAK Server host/IP</label>
+            <input type="text" value={ingest.host} onChange={(e) => updateIngest({ host: e.target.value })} className="input w-full text-sm font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">CoT port (TLS)</label>
+            <input type="number" value={ingest.port} onChange={(e) => updateIngest({ port: parseInt(e.target.value) || 8089 })} className="input w-full text-sm" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Client cert name (in the TAK certs folder)</label>
+          <input type="text" value={ingest.certName} onChange={(e) => updateIngest({ certName: e.target.value })} className="input w-full text-sm font-mono" />
+          <p className="text-xs text-slate-500 mt-1">Reads <span className="font-mono">{ingest.certName}.pem/.key</span> + <span className="font-mono">ca.pem</span>. Use a dedicated cert; only one connection may use it at a time.</p>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={ingest.includeGeoChat} onChange={(e) => updateIngest({ includeGeoChat: e.target.checked })} className="w-4 h-4" />
+            Include GeoChat
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={ingest.includeDrawings} onChange={(e) => updateIngest({ includeDrawings: e.target.checked })} className="w-4 h-4" />
+            Include drawings/shapes
+          </label>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleIngestSave} className="btn-primary">💾 Save Ingest Settings</button>
+          {ingestSaved && <span className="text-sm text-green-400">✓ Saved — reconnecting ingest.</span>}
+        </div>
       </div>
 
       {/* Data package — the iTAK path (iOS has no enrollment) */}

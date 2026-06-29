@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { forward as mgrsForward, toPoint as mgrsToPoint } from 'mgrs';
@@ -149,6 +149,7 @@ export default function TacticalView({ nodes, radios, aircraft = [], takContacts
   const [showSidebar, setShowSidebar] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<'all' | ContactSource>('all');
   const [contactSearch, setContactSearch] = useState('');
+  const [showChat, setShowChat] = useState(false);
   const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
   const [cursor, setCursor] = useState<{ lat: number; lng: number } | null>(null);
   const [gotoInput, setGotoInput] = useState('');
@@ -158,6 +159,7 @@ export default function TacticalView({ nodes, radios, aircraft = [], takContacts
   const [hideNonTeam, setHideNonTeam] = useState(false);
   const manager = useStore(state => state.manager);
   const cotConfig = useStore(state => state.cotConfig);
+  const takChat = useStore(state => state.takChat);
   const [mapLayer, setMapLayer] = useState<'osm' | 'satellite' | 'topo'>('satellite');
   const [showAircraft, setShowAircraft] = useState(true);
   const [showAircraftTrails, setShowAircraftTrails] = useState(true);
@@ -406,9 +408,13 @@ All devices must use the EXACT same PSK and channel index.`;
   const visibleAircraft = aircraft.filter(
     a => typeof a.lat === 'number' && typeof a.lon === 'number' && (a.seenPos ?? 0) <= AIRCRAFT_STALE_SEC
   );
-  // Positioned TAK contacts + markers (drawings rendered separately in a later phase).
+  // Positioned TAK contacts + markers (drawings rendered as polylines/polygons).
   const visibleTakTracks = takTracks.filter(
     c => c.kind !== 'drawing' && typeof c.lat === 'number' && typeof c.lon === 'number'
+  );
+  // TAK drawings/shapes with at least a segment of geometry.
+  const takDrawings = takTracks.filter(
+    c => c.kind === 'drawing' && Array.isArray(c.points) && c.points.length >= 2
   );
   const defaultCenter: [number, number] = nodesWithPosition.length > 0
     ? [nodesWithPosition[0].position!.latitude, nodesWithPosition[0].position!.longitude]
@@ -1174,6 +1180,35 @@ All devices must use the EXACT same PSK and channel index.`;
             </Marker>
           ))}
 
+          {/* Inbound TAK drawings/shapes (freeform/rectangles → polygons, routes → lines) */}
+          {takDrawings.map(d => {
+            const positions = d.points as [number, number][];
+            const color = takColor(d);
+            const closed = /u-d-(f|r)/.test(d.cotType);
+            const popup = (
+              <Popup>
+                <div className="min-w-[180px]">
+                  <h3 className="font-bold text-base mb-1">{d.callsign}</h3>
+                  <div className="text-sm space-y-1">
+                    <div><strong>Drawing:</strong> {d.cotType}</div>
+                    {d.team && <div><strong>Team:</strong> {d.team}</div>}
+                    {d.remarks && <div><strong>Remarks:</strong> {d.remarks}</div>}
+                    <div><strong>Vertices:</strong> {positions.length}</div>
+                  </div>
+                </div>
+              </Popup>
+            );
+            return closed ? (
+              <Polygon key={`takdraw-${d.uid}`} positions={positions} pathOptions={{ color, weight: 2, fillOpacity: 0.15 }}>
+                {popup}
+              </Polygon>
+            ) : (
+              <Polyline key={`takdraw-${d.uid}`} positions={positions} pathOptions={{ color, weight: 2 }}>
+                {popup}
+              </Polyline>
+            );
+          })}
+
           {/* Inbound TAK tracks (other TAK clients' positions + dropped markers) */}
           {visibleTakTracks.map(c => (
             <Marker
@@ -1214,6 +1249,34 @@ All devices must use the EXACT same PSK and channel index.`;
             <div>MGRS: {cursorMgrs}</div>
           </div>
         )}
+
+        {/* GeoChat panel — inbound b-t-f messages from TAK clients */}
+        <div className="absolute bottom-2 right-2 z-[500] w-72 max-w-[80%]">
+          <button
+            onClick={() => setShowChat(v => !v)}
+            className="w-full flex items-center justify-between bg-slate-900/90 text-white text-xs px-3 py-2 rounded-t border border-slate-700 hover:bg-slate-800"
+          >
+            <span className="font-semibold">💬 GeoChat {takChat.length > 0 && <span className="text-emerald-400">({takChat.length})</span>}</span>
+            <span className="text-slate-400">{showChat ? '▼' : '▲'}</span>
+          </button>
+          {showChat && (
+            <div className="bg-slate-900/95 border border-t-0 border-slate-700 rounded-b max-h-56 overflow-y-auto p-2 space-y-1.5">
+              {takChat.length === 0 && (
+                <div className="text-[11px] text-slate-500 py-2 text-center">No messages yet</div>
+              )}
+              {takChat.slice(-50).map((m, i) => (
+                <div key={`${m.uid}-${i}`} className="text-[11px] leading-snug">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="font-semibold text-cyan-300 truncate">{m.sender}</span>
+                    <span className="text-slate-500 truncate">→ {m.room}</span>
+                    <span className="ml-auto text-slate-600 flex-shrink-0">{new Date(m.time).toLocaleTimeString()}</span>
+                  </div>
+                  <div className="text-slate-200 ml-0.5 break-words">{m.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         </div>
       </div>
 

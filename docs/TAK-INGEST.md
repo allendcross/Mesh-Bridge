@@ -1,6 +1,18 @@
 # TAK Ingest — Inbound CoT for a Common Operating Picture
 
-**Status:** Phases 1–2 ✅ COMPLETE — Phases 3–5 pending.
+**Status:** ✅ COMPLETE — all 5 phases shipped.
+
+## Phases 3–5 — done
+
+- **Phase 3 (drawings):** `TacticalView` renders `kind:'drawing'` tracks from their
+  `<link>` geometry — freeform/rectangles (`u-d-f`/`u-d-r`) as filled Leaflet
+  `Polygon`s, routes/lines as `Polyline`s, team-colored, with popups.
+- **Phase 4 (GeoChat):** collapsible GeoChat panel (bottom-right of the map) showing
+  inbound `b-t-f` messages (sender → room, text, time) from the `takChat` store list.
+- **Phase 5 (settings):** "TAK Ingest (Monitor)" card in `CotSettings.tsx` — enable
+  toggle, host/port, cert name, GeoChat + drawings checkboxes. Wired through
+  `webSocketManager` (`get/set-tak-ingest-config`) + store (`getTakIngestConfig`/
+  `setTakIngestConfig`), requested on connect. Verified config round-trip over WS.
 
 ## Phase 2 — done (frontend contacts + markers)
 

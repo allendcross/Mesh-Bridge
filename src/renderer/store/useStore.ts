@@ -19,6 +19,7 @@ interface AppStore {
   takChat: TakChatMessage[]; // inbound GeoChat messages (ephemeral)
   stationLocation: StationLocation | null; // server/relay location for map auto-center
   cotConfig: any | null; // CoT/TAK output config
+  takIngestConfig: any | null; // TAK ingest (inbound CoT) config
   adsbConfig: any | null; // ADS-B feed config
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
@@ -101,6 +102,10 @@ interface AppStore {
   // CoT / TAK Actions
   getCotConfig: () => void;
   setCotConfig: (config: any) => void;
+
+  // TAK ingest (inbound CoT) Actions
+  getTakIngestConfig: () => void;
+  setTakIngestConfig: (config: any) => void;
 }
 
 export const useStore = create<AppStore>((set, get) => {
@@ -278,6 +283,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ cotConfig: config });
   });
 
+  // TAK ingest (inbound CoT) config
+  manager.on('tak-ingest-config', (config: any) => {
+    set({ takIngestConfig: config });
+  });
+
   // ADS-B feed config
   manager.on('adsb-config', (config: any) => {
     set({ adsbConfig: config });
@@ -293,6 +303,7 @@ export const useStore = create<AppStore>((set, get) => {
     set({ bridgeConnected: true });
     manager.requestStationLocation();
     manager.requestCotConfig();
+    manager.requestTakIngestConfig();
   });
 
   // AI event listeners
@@ -344,6 +355,7 @@ export const useStore = create<AppStore>((set, get) => {
     takChat: [],
     stationLocation: null,
     cotConfig: null,
+    takIngestConfig: null,
     adsbConfig: null,
     bridgeConfig: null,
     telemetryHistory: new Map(),
@@ -373,6 +385,7 @@ export const useStore = create<AppStore>((set, get) => {
         set({ bridgeConnected: true });
         manager.requestStationLocation();
         manager.requestCotConfig();
+        manager.requestTakIngestConfig();
 
         // Auto-enable auto-scan when bridge connects
         const state = get();
@@ -657,6 +670,14 @@ export const useStore = create<AppStore>((set, get) => {
 
     setCotConfig: (config: any) => {
       manager.setCotConfig(config);
+    },
+
+    getTakIngestConfig: () => {
+      manager.requestTakIngestConfig();
+    },
+
+    setTakIngestConfig: (config: any) => {
+      manager.setTakIngestConfig(config);
     },
   };
 });

@@ -484,6 +484,11 @@ export class WebSocketRadioManager {
         this.emit('cot-config', data.config);
         break;
 
+      case 'tak-ingest-config':
+      case 'tak-ingest-config-changed':
+        this.emit('tak-ingest-config', data.config);
+        break;
+
       case 'station-location':
         // Server/relay location for auto-centering the Tactical map.
         this.emit('station-location', {
@@ -824,6 +829,20 @@ export class WebSocketRadioManager {
   setCotConfig(config: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'set-cot-config', config }));
+    }
+  }
+
+  /** Request the TAK ingest (inbound CoT) config. */
+  requestTakIngestConfig() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-tak-ingest-config' }));
+    }
+  }
+
+  /** Update the TAK ingest config. */
+  setTakIngestConfig(config: any) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set-tak-ingest-config', config }));
     }
   }
 
