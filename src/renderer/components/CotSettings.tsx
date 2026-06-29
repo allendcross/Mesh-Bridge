@@ -61,26 +61,18 @@ export default function CotSettings() {
     window.location.href = packageUrl;
   };
 
-  // Native ATAK/iTAK QR: prepare a package server-side, then encode the Marti-sync
-  // URL ATAK fetches to auto-import the connection (the mechanism FTS itself uses).
-  const generateQuickConnectQR = async () => {
-    if (!takHost) return;
-    setQrBusy(true); setQrErr(''); setQrDataUrl('');
-    try {
-      const res = await fetch(`/api/tak-prepare?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`);
-      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).error) || res.statusText);
-      const { toolPath } = await res.json();
-      const target = `${window.location.origin}${toolPath}`;
-      setQrDataUrl(await QRCode.toDataURL(target, { width: 240, margin: 1 }));
-    } catch (e: any) {
-      setQrErr(e?.message || 'Failed to generate QR');
-    } finally {
-      setQrBusy(false);
-    }
-  };
-
-  // Invalidate a stale QR when the connection details change.
-  useEffect(() => { setQrDataUrl(''); setQrErr(''); }, [takHost, takPort]);
+  // QR encodes the package download URL. iTAK's in-app scanner only accepts TAK
+  // *enrollment* QRs (which FreeTAKServer doesn't support), so this is meant for the
+  // phone CAMERA: scan -> open in browser -> download the .zip -> Share into ATAK/iTAK.
+  useEffect(() => {
+    setQrErr('');
+    if (!takHost || !packageUrl) { setQrDataUrl(''); return; }
+    setQrBusy(true);
+    QRCode.toDataURL(packageUrl, { width: 280, margin: 2, errorCorrectionLevel: 'L' })
+      .then((u) => setQrDataUrl(u))
+      .catch((e) => { setQrErr(e?.message || 'Failed to generate QR'); setQrDataUrl(''); })
+      .finally(() => setQrBusy(false));
+  }, [packageUrl, takHost]);
 
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
@@ -231,30 +223,26 @@ export default function CotSettings() {
         </div>
         <div className="flex flex-col md:flex-row gap-5 items-start">
           <div className="flex-1 space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <button onClick={generateQuickConnectQR} disabled={!takHost || qrBusy} className="btn-primary disabled:opacity-50">
-                {qrBusy ? 'Generating…' : '📷 Generate Quick-Connect QR'}
-              </button>
-              <button onClick={downloadPackage} disabled={!takHost} className="btn-secondary disabled:opacity-50">
-                ⤓ Download .zip instead
-              </button>
-            </div>
+            <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
+              ⤓ Download Connection Package (.zip)
+            </button>
             {qrErr && <p className="text-xs text-red-400">{qrErr}</p>}
             <p className="text-xs text-slate-500">
-              <strong>QR (recommended):</strong> open the scanner in <span className="font-mono">ATAK/iTAK</span> (or the phone camera) and scan —
-              the app fetches and <em>auto-imports</em> the connection over TLS. No file handling, no username/password.
+              Two ways to get this onto your device, then <strong>Share → ATAK/iTAK</strong> to import the secure connection:
               <br />
-              <strong>.zip:</strong> AirDrop/email <span className="font-mono">MeshBridge.zip</span> and import it manually.
+              <strong>1. File:</strong> download <span className="font-mono">MeshBridge.zip</span> and AirDrop/email it to your phone.
               <br />
+              <strong>2. QR:</strong> scan it with the phone's <strong>Camera app</strong> → open the link → it downloads the package.
+              <br />
+              <em>Note:</em> don't use iTAK's built-in QR scanner — it only accepts TAK enrollment QRs, which FreeTAKServer doesn't provide.
               Host is pre-filled from how you reached this page; change it to your Tailscale IP for remote use.
-              Requires FreeTAKServer (certs at <span className="font-mono">/opt/freetakserver/data/certs</span>).
             </p>
           </div>
 
           {qrDataUrl && (
             <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
-              <img src={qrDataUrl} alt="ATAK/iTAK quick-connect QR" width={200} height={200} />
-              <span className="text-xs text-slate-700 mt-1 font-medium">Scan in ATAK/iTAK to auto-import</span>
+              <img src={qrDataUrl} alt="Scan with phone camera to download the TAK connection package" width={220} height={220} />
+              <span className="text-xs text-slate-700 mt-1 font-medium text-center">📷 Scan with phone <strong>Camera</strong><br/>to download the package</span>
             </div>
           )}
         </div>
