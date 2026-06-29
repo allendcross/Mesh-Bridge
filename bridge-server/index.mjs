@@ -31,6 +31,7 @@ import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import { AdsbService } from './services/AdsbService.mjs';
 import { CotService } from './services/CotService.mjs';
 import { buildTakDataPackage } from './services/TakPackageService.mjs';
+import { createHash } from 'crypto';
 import fetch from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
@@ -226,6 +227,7 @@ class MeshtasticBridgeServer {
     this.cotTcpPort = 8087;                  // FreeTAKServer CoT streaming port
     this.cotService = null;                  // CotService instance
     this.takCertsPath = '/opt/freetakserver/data/certs'; // TAK server certs (for client data packages)
+    this.takPackageCache = new Map(); // hash -> { buf, name } for ATAK QR (Marti sync) import
 
     // ===== PORT EXCLUSION CONFIGURATION =====
     // Ports to exclude from bridge usage (persists across reboots)
@@ -592,6 +594,59 @@ class MeshtasticBridgeServer {
         res.end(JSON.stringify({ error: error.message }));
         return true;
       }
+    }
+
+    // Prepare a TAK package for native ATAK QR import: build it, cache by hash,
+    // return the Marti-sync path the QR should encode.
+    if (url.pathname === '/api/tak-prepare' && req.method === 'GET') {
+      try {
+        const host = url.searchParams.get('host');
+        const port = parseInt(url.searchParams.get('port') || '8089');
+        const name = (url.searchParams.get('name') || 'MeshBridge').replace(/[^A-Za-z0-9_-]/g, '') || 'MeshBridge';
+        if (!host) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'host query parameter is required' }));
+          return true;
+        }
+        const buf = await buildTakDataPackage({ certsPath: this.takCertsPath, host, port, name });
+        const hash = createHash('sha256').update(buf).digest('hex');
+        this.takPackageCache.set(hash, { buf, name });
+        // Cap the cache (keep the most recent ~20)
+        if (this.takPackageCache.size > 20) {
+          const oldest = this.takPackageCache.keys().next().value;
+          this.takPackageCache.delete(oldest);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ hash, name, toolPath: `/Marti/api/sync/metadata/${hash}/tool` }));
+        return true;
+      } catch (error) {
+        console.error('❌ TAK prepare error:', error.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+        return true;
+      }
+    }
+
+    // Marti sync data-package download — what ATAK fetches when it scans the QR.
+    if ((url.pathname.startsWith('/Marti/api/sync/metadata/') && url.pathname.endsWith('/tool'))
+        || url.pathname === '/Marti/sync/content') {
+      const hash = url.pathname === '/Marti/sync/content'
+        ? url.searchParams.get('hash')
+        : url.pathname.split('/')[5];
+      const entry = hash && this.takPackageCache.get(hash);
+      if (!entry) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'package not found (regenerate the QR)' }));
+        return true;
+      }
+      console.log(`📲 ATAK fetched TAK data package via Marti sync (${hash.slice(0, 12)}…)`);
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${entry.name}.zip"`,
+        'Content-Length': entry.buf.length,
+      });
+      res.end(entry.buf);
+      return true;
     }
 
     // TAK client connection data package (ATAK/iTAK)
@@ -1191,8 +1246,8 @@ class MeshtasticBridgeServer {
 
     // Create HTTP server for static files
     const httpServer = createServer(async (req, res) => {
-      // Handle API routes
-      if (req.url.startsWith('/api/')) {
+      // Handle API routes (and the Marti sync path ATAK uses for QR data-package import)
+      if (req.url.startsWith('/api/') || req.url.startsWith('/Marti/')) {
         const apiHandled = await this.handleApiRequest(req, res);
         if (apiHandled) {
           return;

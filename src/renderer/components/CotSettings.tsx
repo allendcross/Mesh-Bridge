@@ -48,22 +48,39 @@ export default function CotSettings() {
   const [takHost, setTakHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
   const [takPort, setTakPort] = useState(8089);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrErr, setQrErr] = useState('');
 
-  // Absolute download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
+  // Direct download URL (uses the origin you reached the GUI on, so it's reachable by the phone).
   const packageUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`
     : '';
-
-  // Regenerate the QR whenever the connection details change.
-  useEffect(() => {
-    if (!takHost) { setQrDataUrl(''); return; }
-    QRCode.toDataURL(packageUrl, { width: 240, margin: 1 }).then(setQrDataUrl).catch(() => setQrDataUrl(''));
-  }, [packageUrl, takHost]);
 
   const downloadPackage = () => {
     if (!takHost) return;
     window.location.href = packageUrl;
   };
+
+  // Native ATAK/iTAK QR: prepare a package server-side, then encode the Marti-sync
+  // URL ATAK fetches to auto-import the connection (the mechanism FTS itself uses).
+  const generateQuickConnectQR = async () => {
+    if (!takHost) return;
+    setQrBusy(true); setQrErr(''); setQrDataUrl('');
+    try {
+      const res = await fetch(`/api/tak-prepare?host=${encodeURIComponent(takHost)}&port=${takPort}&name=MeshBridge`);
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).error) || res.statusText);
+      const { toolPath } = await res.json();
+      const target = `${window.location.origin}${toolPath}`;
+      setQrDataUrl(await QRCode.toDataURL(target, { width: 240, margin: 1 }));
+    } catch (e: any) {
+      setQrErr(e?.message || 'Failed to generate QR');
+    } finally {
+      setQrBusy(false);
+    }
+  };
+
+  // Invalidate a stale QR when the connection details change.
+  useEffect(() => { setQrDataUrl(''); setQrErr(''); }, [takHost, takPort]);
 
   useEffect(() => { getCotConfig(); }, [getCotConfig]);
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
@@ -213,22 +230,31 @@ export default function CotSettings() {
           </div>
         </div>
         <div className="flex flex-col md:flex-row gap-5 items-start">
-          <div className="flex-1">
-            <button onClick={downloadPackage} disabled={!takHost} className="btn-primary disabled:opacity-50">
-              ⤓ Download Connection Package (.zip)
-            </button>
-            <p className="text-xs text-slate-500 mt-2">
-              AirDrop / email the downloaded <span className="font-mono">MeshBridge.zip</span> to your device, then import it in iTAK/ATAK.
-              The host is pre-filled with however you reached this page; change it to your Tailscale IP for remote use.
+          <div className="flex-1 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <button onClick={generateQuickConnectQR} disabled={!takHost || qrBusy} className="btn-primary disabled:opacity-50">
+                {qrBusy ? 'Generating…' : '📷 Generate Quick-Connect QR'}
+              </button>
+              <button onClick={downloadPackage} disabled={!takHost} className="btn-secondary disabled:opacity-50">
+                ⤓ Download .zip instead
+              </button>
+            </div>
+            {qrErr && <p className="text-xs text-red-400">{qrErr}</p>}
+            <p className="text-xs text-slate-500">
+              <strong>QR (recommended):</strong> open the scanner in <span className="font-mono">ATAK/iTAK</span> (or the phone camera) and scan —
+              the app fetches and <em>auto-imports</em> the connection over TLS. No file handling, no username/password.
+              <br />
+              <strong>.zip:</strong> AirDrop/email <span className="font-mono">MeshBridge.zip</span> and import it manually.
+              <br />
+              Host is pre-filled from how you reached this page; change it to your Tailscale IP for remote use.
               Requires FreeTAKServer (certs at <span className="font-mono">/opt/freetakserver/data/certs</span>).
             </p>
           </div>
 
-          {/* QR quick-connect: scan with the phone to fetch the package */}
           {qrDataUrl && (
             <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
-              <img src={qrDataUrl} alt="TAK connection QR" width={200} height={200} />
-              <span className="text-xs text-slate-700 mt-1 font-medium">📷 Scan to download on phone</span>
+              <img src={qrDataUrl} alt="ATAK/iTAK quick-connect QR" width={200} height={200} />
+              <span className="text-xs text-slate-700 mt-1 font-medium">Scan in ATAK/iTAK to auto-import</span>
             </div>
           )}
         </div>
