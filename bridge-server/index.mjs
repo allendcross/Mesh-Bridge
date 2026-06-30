@@ -224,6 +224,8 @@ class MeshtasticBridgeServer {
     this.cotPublishAircraft = true;
     this.cotClassifyNodes = true;            // classify nodes (sensor/relay/radio/unit) vs blanket a-f-G-U-C
     this.cotNodeTypes = null;                // optional per-category CoT type overrides (null = defaults)
+    this.cotHomeLat = null;                  // bridge's physical location — overrides own radios' (bad) GPS in CoT
+    this.cotHomeLon = null;
     this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
     this.cotMulticastEnabled = true;         // emit UDP multicast (LAN ATAK)
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
@@ -475,6 +477,8 @@ class MeshtasticBridgeServer {
           if (config.cot.publishAircraft !== undefined) this.cotPublishAircraft = config.cot.publishAircraft;
           if (config.cot.classifyNodes !== undefined) this.cotClassifyNodes = config.cot.classifyNodes;
           if (config.cot.nodeTypes !== undefined) this.cotNodeTypes = config.cot.nodeTypes;
+          if (config.cot.homeLat !== undefined) this.cotHomeLat = config.cot.homeLat;
+          if (config.cot.homeLon !== undefined) this.cotHomeLon = config.cot.homeLon;
           if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
           if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
           if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
@@ -586,6 +590,8 @@ class MeshtasticBridgeServer {
           publishAircraft: this.cotPublishAircraft,
           classifyNodes: this.cotClassifyNodes,
           nodeTypes: this.cotNodeTypes,
+          homeLat: this.cotHomeLat,
+          homeLon: this.cotHomeLon,
           teamColor: this.cotTeamColor,
           multicastEnabled: this.cotMulticastEnabled,
           tcpHost: this.cotTcpHost,
@@ -2125,8 +2131,10 @@ class MeshtasticBridgeServer {
           }
         });
 
-        // Also emit this node as a CoT track for ATAK (if enabled)
-        this.cotService?.publishNode(meshNode);
+        // Also emit this node as a CoT track for ATAK (if enabled). The bridge's
+        // own radio(s) are stationary at a known home location, so prefer that
+        // over their (often missing/incorrect) GPS fix.
+        this.cotService?.publishNode(this.applyCotHome(meshNode));
       });
 
       protocolHandler.on('config', (configData) => {
@@ -6128,10 +6136,36 @@ class MeshtasticBridgeServer {
       publishAircraft: this.cotPublishAircraft,
       classifyNodes: this.cotClassifyNodes,
       nodeTypes: this.cotNodeTypes,
+      homeLat: this.cotHomeLat,
+      homeLon: this.cotHomeLon,
       teamColor: this.cotTeamColor,
       multicastEnabled: this.cotMulticastEnabled,
       tcpHost: this.cotTcpHost,
       tcpPort: this.cotTcpPort,
+    };
+  }
+
+  /** True if this mesh node is one of the bridge's own connected radios. */
+  isOwnRadioNode(meshNode) {
+    if (!meshNode) return false;
+    let num = meshNode.num;
+    if (num == null && typeof meshNode.nodeId === 'string' && meshNode.nodeId.startsWith('!')) {
+      num = parseInt(meshNode.nodeId.slice(1), 16);
+    }
+    if (num == null || Number.isNaN(num)) return false;
+    for (const radio of this.radios.values()) {
+      if (radio.nodeNum != null && radio.nodeNum === num) return true;
+    }
+    return false;
+  }
+
+  /** Override the bridge's own radio position with the configured home location. */
+  applyCotHome(meshNode) {
+    if (typeof this.cotHomeLat !== 'number' || typeof this.cotHomeLon !== 'number') return meshNode;
+    if (!this.isOwnRadioNode(meshNode)) return meshNode;
+    return {
+      ...meshNode,
+      position: { ...(meshNode.position || {}), latitude: this.cotHomeLat, longitude: this.cotHomeLon },
     };
   }
 
@@ -6164,6 +6198,8 @@ class MeshtasticBridgeServer {
       if (config.publishAircraft !== undefined) this.cotPublishAircraft = config.publishAircraft;
       if (config.classifyNodes !== undefined) this.cotClassifyNodes = config.classifyNodes;
       if (config.nodeTypes !== undefined) this.cotNodeTypes = config.nodeTypes;
+      if (config.homeLat !== undefined) this.cotHomeLat = (config.homeLat === null || config.homeLat === '') ? null : Number(config.homeLat);
+      if (config.homeLon !== undefined) this.cotHomeLon = (config.homeLon === null || config.homeLon === '') ? null : Number(config.homeLon);
       if (config.teamColor) this.cotTeamColor = config.teamColor;
       if (config.multicastEnabled !== undefined) this.cotMulticastEnabled = config.multicastEnabled;
       if (config.tcpHost !== undefined) this.cotTcpHost = config.tcpHost;

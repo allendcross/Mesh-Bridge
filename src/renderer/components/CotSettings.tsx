@@ -12,6 +12,8 @@ interface CotForm {
   publishNodes: boolean;
   publishAircraft: boolean;
   classifyNodes: boolean;
+  homeLat: number | null;
+  homeLon: number | null;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -28,6 +30,8 @@ const DEFAULTS: CotForm = {
   publishNodes: true,
   publishAircraft: true,
   classifyNodes: true,
+  homeLat: null,
+  homeLon: null,
   teamColor: 'Cyan',
   callsignPrefix: '',
   nodeStaleSec: 300,
@@ -75,6 +79,28 @@ export default function CotSettings() {
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
 
   const update = (patch: Partial<CotForm>) => setForm(prev => ({ ...prev, ...patch }));
+
+  // Bridge home location (overrides the bridge's own radio GPS in TAK).
+  const [homeAddress, setHomeAddress] = useState('');
+  const [geocoding, setGeocoding] = useState(false);
+  const [geoError, setGeoError] = useState('');
+  const geocodeHome = async () => {
+    if (!homeAddress.trim()) return;
+    setGeocoding(true); setGeoError('');
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(homeAddress)}`);
+      const data = await res.json();
+      if (data && data[0]) {
+        update({ homeLat: parseFloat(data[0].lat), homeLon: parseFloat(data[0].lon) });
+      } else {
+        setGeoError('Address not found — enter lat/lon manually.');
+      }
+    } catch {
+      setGeoError('Lookup failed (no internet?) — enter lat/lon manually.');
+    } finally {
+      setGeocoding(false);
+    }
+  };
 
   // ===== TAK Ingest (inbound CoT — the monitoring map's common operating picture) =====
   const INGEST_DEFAULTS = { enabled: false, host: '192.168.0.198', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
@@ -211,6 +237,43 @@ export default function CotSettings() {
             <p className="text-xs text-slate-500 mt-1">How long an aircraft track persists in TAK between updates.</p>
           </div>
         </div>
+      </div>
+
+      {/* Bridge home location — fixes the bridge's own radio position in TAK */}
+      <div className="card p-6 space-y-3">
+        <h3 className="text-lg font-bold text-white">🏠 Bridge Home Location</h3>
+        <p className="text-sm text-slate-400">
+          The bridge's own radio(s) are stationary here. Set this and their (often wrong) GPS is
+          overridden with this location in TAK — so your relay shows up where it actually is.
+          Leave blank to use the radio's reported GPS.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={homeAddress}
+            onChange={(e) => setHomeAddress(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') geocodeHome(); }}
+            placeholder="Enter an address (e.g. 6174 Denton Ranch, Las Vegas NV)"
+            className="input flex-1 text-sm"
+          />
+          <button onClick={geocodeHome} disabled={geocoding} className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-white text-sm whitespace-nowrap disabled:opacity-50">
+            {geocoding ? 'Looking up…' : '🔎 Look up'}
+          </button>
+        </div>
+        {geoError && <p className="text-xs text-amber-400">{geoError}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Latitude</label>
+            <input type="number" step="0.0000001" value={form.homeLat ?? ''} onChange={(e) => update({ homeLat: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Longitude</label>
+            <input type="number" step="0.0000001" value={form.homeLon ?? ''} onChange={(e) => update({ homeLon: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" />
+          </div>
+        </div>
+        <p className="text-xs text-slate-500">
+          Tip: you can also read exact coordinates off the Tactical map's cursor readout, or clear both fields to disable the override.
+        </p>
       </div>
 
       <div className="flex items-center gap-3">

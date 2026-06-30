@@ -35,6 +35,16 @@ the Meshtastic device **role** (captured from NodeInfo) with telemetry fallback:
 
 Captured per node: `role` (NodeInfo `User.role`), shown in the Tactical node popup.
 
+### Bridge home location ✅ DONE
+
+The bridge's **own** radio(s) are stationary at a known spot, but their GPS is
+often missing/wrong, so they'd appear far off in TAK. Set a **home location**
+(`cot.homeLat`/`cot.homeLon`) and the bridge overrides its own radios' position
+with it when emitting CoT — `index.mjs` `applyCotHome()` / `isOwnRadioNode()`
+(matches `radio.nodeNum`). Set it in **TAK Feed settings → Bridge Home Location**
+(address geocode via Nominatim, or manual lat/lon; blank = use radio GPS). Only
+affects the outbound CoT, not the radio's reported position elsewhere.
+
 ## 2. Channel → TAK area (PLANNED)
 
 The Meshtastic **channel is the trust/segmentation boundary** and should map to
