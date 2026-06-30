@@ -118,6 +118,12 @@ export class MeshtasticProtocol extends BaseProtocol {
       node._timestamps.userInfo = new Date();
     }
 
+    // Device role (CLIENT, ROUTER, REPEATER, SENSOR, TAK, …) — drives TAK classification
+    if (update.role && update.role !== node.role) {
+      node.role = update.role;
+      node._timestamps.userInfo = new Date();
+    }
+
     // Position - update if new position data provided
     if (update.position && (update.position.latitude || update.position.longitude)) {
       node.position = {
@@ -387,6 +393,7 @@ export class MeshtasticProtocol extends BaseProtocol {
           longName: node.user.longName,
           shortName: node.user.shortName,
           hwModel: this.getHwModelName(node.user.hwModel),
+          role: this.getRoleName(node.user.role),
           snr: node.snr,
           position: node.position && node.position.latitudeI && node.position.longitudeI ? {
             latitude: node.position.latitudeI / 1e7,
@@ -1574,6 +1581,18 @@ export class MeshtasticProtocol extends BaseProtocol {
       7: 'Long Moderate'
     };
     return presets[preset] || `Unknown (${preset})`;
+  }
+
+  // Decode the Meshtastic device role (Config.DeviceConfig.Role enum) to a name.
+  getRoleName(role) {
+    if (role === undefined || role === null) return undefined;
+    if (typeof role === 'string') return role.toUpperCase();
+    const roles = {
+      0: 'CLIENT', 1: 'CLIENT_MUTE', 2: 'ROUTER', 3: 'ROUTER_CLIENT',
+      4: 'REPEATER', 5: 'TRACKER', 6: 'SENSOR', 7: 'TAK',
+      8: 'CLIENT_HIDDEN', 9: 'LOST_AND_FOUND', 10: 'TAK_TRACKER', 11: 'ROUTER_LATE',
+    };
+    return roles[role];
   }
 
   getHwModelName(model) {

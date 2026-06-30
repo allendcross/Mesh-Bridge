@@ -14,6 +14,7 @@
 
 import dgram from 'dgram';
 import net from 'net';
+import { nodeCotType, CATEGORY_LABEL } from './nodeClassification.mjs';
 
 const escapeXml = (s) => String(s ?? '').replace(/[<>&'"]/g, (c) => (
   { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
@@ -155,16 +156,38 @@ export class CotService {
     if (!this.opts.enabled || !this.opts.publishNodes) return;
     if (!node.position || typeof node.position.latitude !== 'number') return;
     const callsign = `${this.opts.callsignPrefix || ''}${node.shortName || node.longName || node.nodeId}`;
+
+    // Classify so the node shows in TAK as the right thing (sensor/relay/radio/unit)
+    // instead of a blanket friendly combat unit. Toggle off to keep legacy behavior.
+    let type = 'a-f-G-U-C';
+    let category = 'unit';
+    if (this.opts.classifyNodes !== false) {
+      ({ category, cotType: type } = nodeCotType(node, this.opts.nodeTypes));
+    }
+
+    // Environmental readings → a readable line in the marker remarks.
+    const env = [
+      node.temperature != null ? `${Number(node.temperature).toFixed(1)}°C` : null,
+      node.humidity != null ? `${Math.round(node.humidity)}%RH` : null,
+      node.pressure != null ? `${Math.round(node.pressure)}hPa` : null,
+    ].filter(Boolean).join(' ');
+    const remarks = [
+      `${CATEGORY_LABEL[category] || 'Node'} · ${node.hwModel || 'mesh'}`,
+      node.role ? `role ${node.role}` : null,
+      node.batteryLevel !== undefined ? `batt ${node.batteryLevel}%` : null,
+      env || null,
+    ].filter(Boolean).join(' · ');
+
     this.send(this.buildEvent({
       uid: `meshtastic-${node.nodeId}`,
-      type: 'a-f-G-U-C', // friendly ground unit, combat
+      type,
       lat: node.position.latitude,
       lon: node.position.longitude,
       hae: typeof node.position.altitude === 'number' ? node.position.altitude : 9999999.0,
       staleSec: this.opts.nodeStaleSec || 300,
       callsign,
       group: { name: this.opts.teamColor || 'Cyan', role: this.opts.teamRole || 'Team Member' },
-      remarks: `Meshtastic ${node.hwModel || ''} ${node.batteryLevel !== undefined ? `batt ${node.batteryLevel}%` : ''}`.trim(),
+      remarks,
     }));
   }
 

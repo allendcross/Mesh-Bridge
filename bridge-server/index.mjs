@@ -222,6 +222,8 @@ class MeshtasticBridgeServer {
     this.cotAircraftStaleSec = 60;           // CoT stale time for aircraft
     this.cotPublishNodes = true;
     this.cotPublishAircraft = true;
+    this.cotClassifyNodes = true;            // classify nodes (sensor/relay/radio/unit) vs blanket a-f-G-U-C
+    this.cotNodeTypes = null;                // optional per-category CoT type overrides (null = defaults)
     this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
     this.cotMulticastEnabled = true;         // emit UDP multicast (LAN ATAK)
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
@@ -471,6 +473,8 @@ class MeshtasticBridgeServer {
           if (config.cot.aircraftStaleSec !== undefined) this.cotAircraftStaleSec = config.cot.aircraftStaleSec;
           if (config.cot.publishNodes !== undefined) this.cotPublishNodes = config.cot.publishNodes;
           if (config.cot.publishAircraft !== undefined) this.cotPublishAircraft = config.cot.publishAircraft;
+          if (config.cot.classifyNodes !== undefined) this.cotClassifyNodes = config.cot.classifyNodes;
+          if (config.cot.nodeTypes !== undefined) this.cotNodeTypes = config.cot.nodeTypes;
           if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
           if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
           if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
@@ -580,6 +584,8 @@ class MeshtasticBridgeServer {
           aircraftStaleSec: this.cotAircraftStaleSec,
           publishNodes: this.cotPublishNodes,
           publishAircraft: this.cotPublishAircraft,
+          classifyNodes: this.cotClassifyNodes,
+          nodeTypes: this.cotNodeTypes,
           teamColor: this.cotTeamColor,
           multicastEnabled: this.cotMulticastEnabled,
           tcpHost: this.cotTcpHost,
@@ -6120,6 +6126,8 @@ class MeshtasticBridgeServer {
       aircraftStaleSec: this.cotAircraftStaleSec,
       publishNodes: this.cotPublishNodes,
       publishAircraft: this.cotPublishAircraft,
+      classifyNodes: this.cotClassifyNodes,
+      nodeTypes: this.cotNodeTypes,
       teamColor: this.cotTeamColor,
       multicastEnabled: this.cotMulticastEnabled,
       tcpHost: this.cotTcpHost,
@@ -6154,6 +6162,8 @@ class MeshtasticBridgeServer {
       if (config.aircraftStaleSec !== undefined) this.cotAircraftStaleSec = config.aircraftStaleSec;
       if (config.publishNodes !== undefined) this.cotPublishNodes = config.publishNodes;
       if (config.publishAircraft !== undefined) this.cotPublishAircraft = config.publishAircraft;
+      if (config.classifyNodes !== undefined) this.cotClassifyNodes = config.classifyNodes;
+      if (config.nodeTypes !== undefined) this.cotNodeTypes = config.nodeTypes;
       if (config.teamColor) this.cotTeamColor = config.teamColor;
       if (config.multicastEnabled !== undefined) this.cotMulticastEnabled = config.multicastEnabled;
       if (config.tcpHost !== undefined) this.cotTcpHost = config.tcpHost;

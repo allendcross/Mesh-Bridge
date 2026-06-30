@@ -108,6 +108,7 @@ export interface MeshNode {
   longName: string;
   shortName: string;
   hwModel: string;
+  role?: string;           // Meshtastic device role (CLIENT, ROUTER, REPEATER, SENSOR, TAK, …)
   lastHeard: Date;
   snr?: number;
   position?: {

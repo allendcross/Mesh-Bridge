@@ -11,6 +11,7 @@ interface CotForm {
   tcpPort: number;
   publishNodes: boolean;
   publishAircraft: boolean;
+  classifyNodes: boolean;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -26,6 +27,7 @@ const DEFAULTS: CotForm = {
   tcpPort: 8087,
   publishNodes: true,
   publishAircraft: true,
+  classifyNodes: true,
   teamColor: 'Cyan',
   callsignPrefix: '',
   nodeStaleSec: 300,
@@ -175,6 +177,16 @@ export default function CotSettings() {
             <span className="text-sm text-slate-300">✈️ Aircraft (ADS-B)</span>
           </label>
         </div>
+        <label className="flex items-start gap-2 p-3 rounded-lg bg-slate-800 border border-slate-700">
+          <input type="checkbox" checked={form.classifyNodes} onChange={(e) => update({ classifyNodes: e.target.checked })} className="w-4 h-4 mt-0.5" />
+          <span className="text-sm text-slate-300">
+            🏷️ <span className="font-medium">Classify nodes by role</span>
+            <span className="block text-xs text-slate-500 mt-0.5">
+              Show each node in TAK as a sensor, relay, radio, or unit based on its Meshtastic role —
+              instead of every node appearing as a friendly combat unit. Off = legacy (all <span className="font-mono">a-f-G-U-C</span>).
+            </span>
+          </span>
+        </label>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Node team color</label>

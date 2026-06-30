@@ -1117,6 +1117,7 @@ All devices must use the EXACT same PSK and channel index.`;
                   <div className="text-sm space-y-1">
                     <div><strong>Call Sign:</strong> {node.shortName}</div>
                     <div><strong>Device:</strong> {node.hwModel}</div>
+                    {node.role && <div><strong>Role:</strong> {node.role}</div>}
                     <div><strong>Position:</strong> {node.position!.latitude.toFixed(6)}, {node.position!.longitude.toFixed(6)}</div>
                     {node.position!.altitude && (
                       <div><strong>Altitude:</strong> {node.position!.altitude}m</div>
