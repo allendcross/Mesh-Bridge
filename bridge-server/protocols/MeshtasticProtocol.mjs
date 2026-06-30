@@ -596,7 +596,8 @@ export class MeshtasticProtocol extends BaseProtocol {
             name: channelPacket.settings?.name || '',
             psk: channelPacket.settings?.psk ? Buffer.from(channelPacket.settings.psk).toString('base64') : '',
             uplinkEnabled: channelPacket.settings?.uplinkEnabled ?? true,
-            downlinkEnabled: channelPacket.settings?.downlinkEnabled ?? true
+            downlinkEnabled: channelPacket.settings?.downlinkEnabled ?? true,
+            positionPrecision: channelPacket.settings?.moduleSettings?.positionPrecision ?? null
           }
         };
 
@@ -1114,13 +1115,15 @@ export class MeshtasticProtocol extends BaseProtocol {
         }
       }
 
-      // Convert role from string to enum value
-      // Meshtastic Channel.Role enum: 0 = SECONDARY, 1 = PRIMARY, 2 = DISABLED
+      // Convert role from string to enum value.
+      // Meshtastic Channel.Role enum: 0 = DISABLED, 1 = PRIMARY, 2 = SECONDARY
+      // (matches the read mapping in onChannelPacket; the old write map had
+      // SECONDARY/DISABLED inverted, which silently disabled secondary channels.)
       if (typeof channelConfig.role === 'string') {
         const roleMap = {
+          'DISABLED': 0,
           'PRIMARY': 1,
-          'SECONDARY': 0,
-          'DISABLED': 2
+          'SECONDARY': 2
         };
         const roleString = channelConfig.role;
         const roleValue = roleMap[channelConfig.role];
