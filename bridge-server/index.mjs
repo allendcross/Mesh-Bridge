@@ -31,6 +31,7 @@ import { createProtocol, getSupportedProtocols } from './protocols/index.mjs';
 import { AdsbService } from './services/AdsbService.mjs';
 import { CotService } from './services/CotService.mjs';
 import { CotIngestService } from './services/CotIngestService.mjs';
+import { MessageRecorderService } from './services/MessageRecorderService.mjs';
 import { buildTakDataPackage } from './services/TakPackageService.mjs';
 import { createHash } from 'crypto';
 import fetch from 'node-fetch';
@@ -70,6 +71,12 @@ class MeshtasticBridgeServer {
     this.clients = new Set(); // WebSocket clients
     this.messageHistory = [];
     this.maxHistorySize = 1000;              // Keep last 1000 messages (increased for high uptime)
+
+    // Durable, on-disk message recorder (survives restarts; not browser-bound)
+    this.msgRecordEnabled = true;
+    this.msgRecordRetentionDays = 365;
+    this.msgRecordDir = join(__dirname, 'data', 'messages');
+    this.messageRecorder = null;
     this.seenMessageIds = new Set();         // Track message IDs for deduplication
     this.maxSeenMessages = 2000;             // Limit size of seen messages set (increased)
     this.seenMessageTimestamps = new Map();  // Track when message IDs were added for age-based cleanup
@@ -498,6 +505,13 @@ class MeshtasticBridgeServer {
           console.log(`📋 Loaded TAK ingest config: ${this.takIngestEnabled ? `ENABLED (← ${this.takIngestHost}:${this.takIngestPort})` : 'DISABLED'}`);
         }
 
+        // Load message recorder configuration
+        if (config.messageRecorder) {
+          if (config.messageRecorder.enabled !== undefined) this.msgRecordEnabled = config.messageRecorder.enabled;
+          if (config.messageRecorder.retentionDays !== undefined) this.msgRecordRetentionDays = config.messageRecorder.retentionDays;
+          console.log(`📋 Loaded message recorder config: ${this.msgRecordEnabled ? `ENABLED (retain ${this.msgRecordRetentionDays}d)` : 'DISABLED'}`);
+        }
+
         // Load Port Exclusion configuration
         if (Array.isArray(config.excludedPorts)) {
           this.excludedPorts = config.excludedPorts;
@@ -605,6 +619,10 @@ class MeshtasticBridgeServer {
           certName: this.takIngestCertName,
           includeGeoChat: this.takIngestGeoChat,
           includeDrawings: this.takIngestDrawings
+        },
+        messageRecorder: {
+          enabled: this.msgRecordEnabled,
+          retentionDays: this.msgRecordRetentionDays
         },
         excludedPorts: this.excludedPorts,
         disablePublicChannel: this.disablePublicChannel
@@ -1429,6 +1447,9 @@ class MeshtasticBridgeServer {
       // Start TAK ingest — inbound CoT from the TAK Server (if enabled)
       this.startTakIngestService();
 
+      // Start the durable on-disk message recorder
+      this.startMessageRecorder();
+
       // Resolve where the server is, to auto-center the Tactical map
       this.resolveStationLocation();
 
@@ -1593,6 +1614,18 @@ class MeshtasticBridgeServer {
 
         case 'set-tak-ingest-config':
           await this.takIngestSetConfig(ws, message.config || {});
+          break;
+
+        case 'get-message-log':
+          await this.sendMessageLog(ws, message);
+          break;
+
+        case 'get-message-recorder-stats':
+          await this.sendMessageRecorderStats(ws);
+          break;
+
+        case 'set-message-recorder-config':
+          await this.messageRecorderSetConfig(ws, message.config || {});
           break;
 
         case 'set-adsb-config':
@@ -2561,6 +2594,7 @@ class MeshtasticBridgeServer {
           if (this.messageHistory.length > this.maxHistorySize) {
             this.messageHistory.shift();
           }
+          this.recordMessage(message);
 
           this.broadcast({
             type: 'message',
@@ -2631,6 +2665,7 @@ class MeshtasticBridgeServer {
         if (this.messageHistory.length > this.maxHistorySize) {
           this.messageHistory.shift();
         }
+        this.recordMessage(message);
 
         // Broadcast to all connected clients
         this.broadcast({
@@ -6143,6 +6178,82 @@ class MeshtasticBridgeServer {
       tcpHost: this.cotTcpHost,
       tcpPort: this.cotTcpPort,
     };
+  }
+
+  // ===== MESSAGE RECORDER =====
+
+  startMessageRecorder() {
+    if (this.messageRecorder) this.messageRecorder.stop();
+    this.messageRecorder = new MessageRecorderService(
+      { enabled: this.msgRecordEnabled, dir: this.msgRecordDir, retentionDays: this.msgRecordRetentionDays },
+      (level, msg) => console.log(msg)
+    );
+    this.messageRecorder.start();
+  }
+
+  async sendMessageLog(ws, message) {
+    try {
+      const records = this.messageRecorder
+        ? await this.messageRecorder.query({
+            date: message.date || undefined,
+            channelIndex: (message.channelIndex === undefined || message.channelIndex === null) ? undefined : message.channelIndex,
+            search: message.search || undefined,
+            limit: message.limit || 1000,
+            sinceMs: message.sinceMs || undefined,
+          })
+        : [];
+      const days = this.messageRecorder ? await this.messageRecorder.listDays() : [];
+      ws.send(JSON.stringify({ type: 'message-log', records, days, query: { date: message.date ?? null, channelIndex: message.channelIndex ?? null, search: message.search ?? '' } }));
+    } catch (error) {
+      ws.send(JSON.stringify({ type: 'message-log', records: [], days: [], error: error.message }));
+    }
+  }
+
+  async sendMessageRecorderStats(ws) {
+    const stats = this.messageRecorder ? await this.messageRecorder.stats() : { total: 0, days: 0, byChannel: {} };
+    ws.send(JSON.stringify({ type: 'message-recorder-stats', enabled: this.msgRecordEnabled, retentionDays: this.msgRecordRetentionDays, ...stats }));
+  }
+
+  async messageRecorderSetConfig(ws, config) {
+    try {
+      if (config.enabled !== undefined) this.msgRecordEnabled = config.enabled;
+      if (config.retentionDays !== undefined) this.msgRecordRetentionDays = config.retentionDays;
+      this.saveConfig();
+      this.startMessageRecorder();
+      ws.send(JSON.stringify({ type: 'message-recorder-config-updated', success: true, enabled: this.msgRecordEnabled, retentionDays: this.msgRecordRetentionDays }));
+    } catch (error) {
+      ws.send(JSON.stringify({ type: 'message-recorder-config-updated', success: false, error: error.message }));
+    }
+  }
+
+  /** Resolve a channel index to a friendly name (from the radio's channel config). */
+  channelNameFor(radioId, idx) {
+    const radio = this.radios.get(radioId);
+    const ch = radio?.channels?.get(idx);
+    const name = ch?.settings?.name || ch?.name;
+    if (name) return name;
+    return idx === 0 ? 'Public (LongFast)' : `Channel ${idx}`;
+  }
+
+  /** Append a received/seen message to the durable on-disk recorder. */
+  recordMessage(message) {
+    if (!this.messageRecorder) return;
+    const ts = (message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp || Date.now()));
+    const from = message.from;
+    this.messageRecorder.record({
+      ts: ts.toISOString(),
+      id: message.id,
+      channel: message.channel ?? 0,
+      channelName: this.channelNameFor(message.radioId, message.channel ?? 0),
+      from,
+      fromId: typeof from === 'number' ? `!${(from >>> 0).toString(16).padStart(8, '0')}` : from,
+      fromName: this.getNodeName(from) || null,
+      to: message.to,
+      text: message.text,
+      radioId: message.radioId,
+      blocked: !!message.blocked,
+      forwarded: !!message.forwarded,
+    });
   }
 
   /** True if this mesh node is one of the bridge's own connected radios. */

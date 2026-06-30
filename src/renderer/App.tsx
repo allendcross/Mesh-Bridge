@@ -78,6 +78,8 @@ function App() {
         return { nodes, radios };
       case 'messages':
         return { messages, radios };
+      case 'recorder':
+        return {};
       case 'tactical':
         return { nodes, radios, aircraft, takContacts, stationLocation };
       case 'siteplanner':

@@ -20,6 +20,8 @@ interface AppStore {
   stationLocation: StationLocation | null; // server/relay location for map auto-center
   cotConfig: any | null; // CoT/TAK output config
   takIngestConfig: any | null; // TAK ingest (inbound CoT) config
+  messageLog: { records: any[]; days: string[]; query: any }; // durable recorder query result
+  messageRecorderStats: any | null; // recorder totals/per-channel/retention
   adsbConfig: any | null; // ADS-B feed config
   bridgeConfig: BridgeConfig | null;
   telemetryHistory: Map<string, TelemetrySnapshot[]>; // nodeId -> snapshots
@@ -106,6 +108,10 @@ interface AppStore {
   // TAK ingest (inbound CoT) Actions
   getTakIngestConfig: () => void;
   setTakIngestConfig: (config: any) => void;
+
+  // Message recorder Actions
+  queryMessageLog: (query: { date?: string | null; channelIndex?: number | null; search?: string; limit?: number }) => void;
+  getMessageRecorderStats: () => void;
 }
 
 export const useStore = create<AppStore>((set, get) => {
@@ -288,6 +294,14 @@ export const useStore = create<AppStore>((set, get) => {
     set({ takIngestConfig: config });
   });
 
+  // Durable message recorder query results + stats
+  manager.on('message-log', (payload: { records: any[]; days: string[]; query: any }) => {
+    set({ messageLog: payload });
+  });
+  manager.on('message-recorder-stats', (stats: any) => {
+    set({ messageRecorderStats: stats });
+  });
+
   // ADS-B feed config
   manager.on('adsb-config', (config: any) => {
     set({ adsbConfig: config });
@@ -356,6 +370,8 @@ export const useStore = create<AppStore>((set, get) => {
     stationLocation: null,
     cotConfig: null,
     takIngestConfig: null,
+    messageLog: { records: [], days: [], query: {} },
+    messageRecorderStats: null,
     adsbConfig: null,
     bridgeConfig: null,
     telemetryHistory: new Map(),
@@ -678,6 +694,14 @@ export const useStore = create<AppStore>((set, get) => {
 
     setTakIngestConfig: (config: any) => {
       manager.setTakIngestConfig(config);
+    },
+
+    queryMessageLog: (query) => {
+      manager.requestMessageLog(query);
+    },
+
+    getMessageRecorderStats: () => {
+      manager.requestMessageRecorderStats();
     },
   };
 });

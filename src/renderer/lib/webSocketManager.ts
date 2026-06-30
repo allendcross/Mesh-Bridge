@@ -489,6 +489,14 @@ export class WebSocketRadioManager {
         this.emit('tak-ingest-config', data.config);
         break;
 
+      case 'message-log':
+        this.emit('message-log', { records: data.records || [], days: data.days || [], query: data.query || {} });
+        break;
+
+      case 'message-recorder-stats':
+        this.emit('message-recorder-stats', data);
+        break;
+
       case 'station-location':
         // Server/relay location for auto-centering the Tactical map.
         this.emit('station-location', {
@@ -836,6 +844,19 @@ export class WebSocketRadioManager {
   requestTakIngestConfig() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'get-tak-ingest-config' }));
+    }
+  }
+
+  /** Query the durable message recorder. */
+  requestMessageLog(query: { date?: string | null; channelIndex?: number | null; search?: string; limit?: number }) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-message-log', ...query }));
+    }
+  }
+
+  requestMessageRecorderStats() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-message-recorder-stats' }));
     }
   }
 

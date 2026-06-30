@@ -4,6 +4,7 @@ import Dashboard from '../Dashboard';
 import DeviceManager from '../DeviceManager';
 import NodeList from '../NodeList';
 import MessageMonitor from '../MessageMonitor';
+import MessageRecorder from '../MessageRecorder';
 import TacticalView from '../TacticalView';
 import SitePlanner from '../SitePlanner';
 import NetworkHealth from '../NetworkHealth';
@@ -29,6 +30,9 @@ export const TAB_ROUTES: Record<Tab, TabRoute> = {
   },
   messages: {
     component: MessageMonitor,
+  },
+  recorder: {
+    component: MessageRecorder,
   },
   tactical: {
     component: TacticalView,

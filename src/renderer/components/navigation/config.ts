@@ -41,6 +41,11 @@ export function getNavigationConfig(
           label: 'Messages',
           badge: () => messages.length
         },
+        {
+          id: 'recorder',
+          icon: 'logs',
+          label: 'Recorder',
+        },
       ]
     },
     {
