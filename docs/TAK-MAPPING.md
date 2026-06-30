@@ -57,12 +57,26 @@ TAK's affiliation + group:
   digit and team color can be chosen per channel. Deeper segmentation (a distinct
   TAK Server *group* per channel) needs per-group feeds (more involved).
 
-## 3. GeoChat ↔ mesh text bridge (PLANNED)
+## 3. GeoChat ↔ mesh text bridge ✅ DONE
 
-Relay text between a mesh channel and a TAK GeoChat room (both directions). Lets
-mesh users *without* smartphones converse with ATAK/WinTAK operators. Inbound
-GeoChat already arrives via `CotIngestService` (`tak-chat`); outbound would send a
-`b-t-f` CoT and a mesh text packet.
+Two-way chat relay between a private mesh channel (default ch1 `chopstak`) and TAK
+GeoChat. Mesh users *without* a smartphone converse with ATAK/WinTAK/TROP operators,
+and vice-versa.
+
+- **Mesh → TAK:** a message on the bridged channel → `CotService.publishGeoChat()`
+  emits a `b-t-f` GeoChat to the TAK feed. The uid carries a `meshrelay-` marker.
+- **TAK → Mesh:** inbound GeoChat (`CotIngestService` → `handleInboundTakChat`) is
+  transmitted on the bridged mesh channel as `"<sender>: <text>"` (fire-and-forget,
+  since the Meshtastic lib may reject with TIMEOUT while the broadcast still goes).
+- **Loop prevention (the hard part):**
+  - Mesh→TAK skips messages where `isFromOurBridgeRadio` — and Meshtastic preserves
+    the original `from` on rebroadcasts, so anything the bridge originated (incl. a
+    TAK→mesh relay) always reads as own-radio and is never re-sent to TAK.
+  - The ingest drops any GeoChat whose uid contains `meshrelay` (the server's echo
+    of our own mesh-origin GeoChat), plus a seen-uid dedup set.
+- Config: `cot.chatBridgeEnabled` + `cot.chatBridgeChannelIndex`; toggle in
+  **TAK Feed settings → GeoChat ↔ Mesh Bridge**. Verified: an injected TAK GeoChat
+  relayed and transmitted on ch1 with no loop.
 
 ## 4. AI SITREPs + SOS alerts (PLANNED)
 

@@ -233,6 +233,11 @@ class MeshtasticBridgeServer {
     this.cotNodeTypes = null;                // optional per-category CoT type overrides (null = defaults)
     this.cotHomeLat = null;                  // bridge's physical location — overrides own radios' (bad) GPS in CoT
     this.cotHomeLon = null;
+
+    // GeoChat ↔ mesh bridge: relay a private mesh channel's messages to/from TAK chat
+    this.chatBridgeEnabled = false;
+    this.chatBridgeChannelIndex = 1;         // which mesh channel to bridge (1 = chopstak)
+    this.seenGeoChatUids = new Set();        // dedup inbound GeoChat to avoid re-sending to mesh
     this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
     this.cotMulticastEnabled = true;         // emit UDP multicast (LAN ATAK)
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
@@ -486,6 +491,8 @@ class MeshtasticBridgeServer {
           if (config.cot.nodeTypes !== undefined) this.cotNodeTypes = config.cot.nodeTypes;
           if (config.cot.homeLat !== undefined) this.cotHomeLat = config.cot.homeLat;
           if (config.cot.homeLon !== undefined) this.cotHomeLon = config.cot.homeLon;
+          if (config.cot.chatBridgeEnabled !== undefined) this.chatBridgeEnabled = config.cot.chatBridgeEnabled;
+          if (config.cot.chatBridgeChannelIndex !== undefined) this.chatBridgeChannelIndex = config.cot.chatBridgeChannelIndex;
           if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
           if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
           if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
@@ -606,6 +613,8 @@ class MeshtasticBridgeServer {
           nodeTypes: this.cotNodeTypes,
           homeLat: this.cotHomeLat,
           homeLon: this.cotHomeLon,
+          chatBridgeEnabled: this.chatBridgeEnabled,
+          chatBridgeChannelIndex: this.chatBridgeChannelIndex,
           teamColor: this.cotTeamColor,
           multicastEnabled: this.cotMulticastEnabled,
           tcpHost: this.cotTcpHost,
@@ -2666,6 +2675,9 @@ class MeshtasticBridgeServer {
           this.messageHistory.shift();
         }
         this.recordMessage(message);
+
+        // Mesh → TAK chat bridge (private channel → GeoChat)
+        this.maybeBridgeMeshToTak(message, isFromOurBridgeRadio);
 
         // Broadcast to all connected clients
         this.broadcast({
@@ -6173,6 +6185,8 @@ class MeshtasticBridgeServer {
       nodeTypes: this.cotNodeTypes,
       homeLat: this.cotHomeLat,
       homeLon: this.cotHomeLon,
+      chatBridgeEnabled: this.chatBridgeEnabled,
+      chatBridgeChannelIndex: this.chatBridgeChannelIndex,
       teamColor: this.cotTeamColor,
       multicastEnabled: this.cotMulticastEnabled,
       tcpHost: this.cotTcpHost,
@@ -6256,6 +6270,55 @@ class MeshtasticBridgeServer {
     });
   }
 
+  // ===== GeoChat ↔ mesh bridge =====
+
+  /** Pick a connected radio to send bridged chat on (prefers one carrying the channel). */
+  pickChatBridgeRadio() {
+    for (const radio of this.radios.values()) {
+      if (radio.status === 'connected' && radio.channels?.has(this.chatBridgeChannelIndex) && radio.protocol) return radio;
+    }
+    for (const radio of this.radios.values()) {
+      if (radio.status === 'connected' && radio.protocol) return radio;
+    }
+    return null;
+  }
+
+  /** Mesh → TAK: relay a private-channel message into TAK chat as GeoChat. */
+  maybeBridgeMeshToTak(message, isFromOurBridgeRadio) {
+    if (!this.chatBridgeEnabled || !this.cotService) return;
+    if ((message.channel ?? 0) !== this.chatBridgeChannelIndex) return;
+    if (isFromOurBridgeRadio) return; // our own relays / TAK-origin messages put on mesh
+    const sender = this.getNodeName(message.from) || message.fromId || `node-${message.from}`;
+    this.cotService.publishGeoChat({
+      sender,
+      text: message.text,
+      uid: `GeoChat.${sender}.AllChatRooms.meshrelay-${message.id}`,
+    });
+    console.log(`💬↗ Mesh→TAK GeoChat from ${sender}: "${message.text}"`);
+  }
+
+  /** TAK → Mesh: relay an inbound GeoChat onto the private mesh channel. */
+  async handleInboundTakChat(chat) {
+    if (!this.chatBridgeEnabled || !chat || !chat.text) return;
+    if (chat.uid && String(chat.uid).includes('meshrelay')) return; // our own echo
+    if (chat.uid) {
+      if (this.seenGeoChatUids.has(chat.uid)) return;
+      this.seenGeoChatUids.add(chat.uid);
+      if (this.seenGeoChatUids.size > 2000) {
+        this.seenGeoChatUids = new Set([...this.seenGeoChatUids].slice(-1000));
+      }
+    }
+    const radio = this.pickChatBridgeRadio();
+    if (!radio) { console.warn('⚠️  Chat bridge: no connected radio to relay TAK→mesh'); return; }
+    const text = `${chat.sender || 'TAK'}: ${chat.text}`.slice(0, 200);
+    // Fire-and-forget: the Meshtastic lib may reject with a TIMEOUT (code 3) while
+    // waiting for a response even though the broadcast still goes out, so don't
+    // await it (same workaround as sendText()).
+    console.log(`💬↘ TAK→Mesh on ch${this.chatBridgeChannelIndex}: "${text}"`);
+    radio.protocol.sendMessage(text, this.chatBridgeChannelIndex, { wantAck: false })
+      .catch((e) => console.log(`   (chat bridge send returned: ${e.message} — broadcast still transmitted)`));
+  }
+
   /** True if this mesh node is one of the bridge's own connected radios. */
   isOwnRadioNode(meshNode) {
     if (!meshNode) return false;
@@ -6311,6 +6374,8 @@ class MeshtasticBridgeServer {
       if (config.nodeTypes !== undefined) this.cotNodeTypes = config.nodeTypes;
       if (config.homeLat !== undefined) this.cotHomeLat = (config.homeLat === null || config.homeLat === '') ? null : Number(config.homeLat);
       if (config.homeLon !== undefined) this.cotHomeLon = (config.homeLon === null || config.homeLon === '') ? null : Number(config.homeLon);
+      if (config.chatBridgeEnabled !== undefined) this.chatBridgeEnabled = config.chatBridgeEnabled;
+      if (config.chatBridgeChannelIndex !== undefined) this.chatBridgeChannelIndex = Number(config.chatBridgeChannelIndex);
       if (config.teamColor) this.cotTeamColor = config.teamColor;
       if (config.multicastEnabled !== undefined) this.cotMulticastEnabled = config.multicastEnabled;
       if (config.tcpHost !== undefined) this.cotTcpHost = config.tcpHost;
@@ -6346,7 +6411,11 @@ class MeshtasticBridgeServer {
     this.stopTakIngestService();
     this.takIngestService = new CotIngestService(
       this.takIngestOptions(),
-      (payload) => this.broadcast(payload), // tak-update / tak-chat / tak-remove
+      (payload) => {
+        this.broadcast(payload); // tak-update / tak-chat / tak-remove
+        // TAK → Mesh chat bridge (inbound GeoChat → private mesh channel)
+        if (payload.type === 'tak-chat') this.handleInboundTakChat(payload.chat);
+      },
       (level, msg) => console.log(msg)
     );
     this.takIngestService.start();

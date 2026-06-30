@@ -210,4 +210,34 @@ export class CotService {
       }));
     }
   }
+
+  /**
+   * Publish a GeoChat (b-t-f) message to TAK so non-Meshtastic devices see it in
+   * chat. The uid carries a `meshrelay-` marker so the inbound ingest can drop the
+   * server's echo of our own message (loop prevention).
+   * @param {object} o - { sender, text, uid, chatroom?, lat?, lon?, staleSec? }
+   */
+  publishGeoChat(o) {
+    if (!this.opts.enabled) return;
+    const now = new Date();
+    const stale = new Date(now.getTime() + (o.staleSec || 86400) * 1000);
+    const iso = (d) => d.toISOString();
+    const room = escapeXml(o.chatroom || 'All Chat Rooms');
+    const sender = escapeXml(o.sender || 'mesh');
+    const uid = escapeXml(o.uid);
+    const lat = typeof o.lat === 'number' ? o.lat : 0.0;
+    const lon = typeof o.lon === 'number' ? o.lon : 0.0;
+    const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<event version="2.0" uid="${uid}" type="b-t-f" how="h-g-i-g-o" ` +
+      `time="${iso(now)}" start="${iso(now)}" stale="${iso(stale)}">` +
+      `<point lat="${lat.toFixed(7)}" lon="${lon.toFixed(7)}" hae="9999999.0" ce="9999999.0" le="9999999.0"/>` +
+      `<detail>` +
+        `<__chat parent="RootContactGroup" groupOwner="false" messageId="${uid}" chatroom="${room}" id="${room}" senderCallsign="${sender}">` +
+          `<chatgrp uid0="${sender}" id="${room}"/>` +
+        `</__chat>` +
+        `<link uid="${sender}" type="a-f-G-U-C" relation="p-p"/>` +
+        `<remarks source="BAO.F.MeshBridge.${sender}" to="${room}" time="${iso(now)}">${escapeXml(o.text || '')}</remarks>` +
+      `</detail></event>`;
+    this.send(xml);
+  }
 }

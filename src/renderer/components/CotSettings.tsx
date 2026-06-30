@@ -14,6 +14,8 @@ interface CotForm {
   classifyNodes: boolean;
   homeLat: number | null;
   homeLon: number | null;
+  chatBridgeEnabled: boolean;
+  chatBridgeChannelIndex: number;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -32,6 +34,8 @@ const DEFAULTS: CotForm = {
   classifyNodes: true,
   homeLat: null,
   homeLon: null,
+  chatBridgeEnabled: false,
+  chatBridgeChannelIndex: 1,
   teamColor: 'Cyan',
   callsignPrefix: '',
   nodeStaleSec: 300,
@@ -274,6 +278,32 @@ export default function CotSettings() {
         <p className="text-xs text-slate-500">
           Tip: you can also read exact coordinates off the Tactical map's cursor readout, or clear both fields to disable the override.
         </p>
+      </div>
+
+      {/* GeoChat <-> mesh bridge */}
+      <div className={`card p-6 space-y-3 ${form.chatBridgeEnabled ? 'border border-cyan-500/40' : 'border border-slate-600'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white">💬 GeoChat ↔ Mesh Bridge</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Two-way chat relay between a private mesh channel and TAK GeoChat. Mesh messages appear in
+              ATAK/WinTAK/TROP chat for devices without Meshtastic; TAK chat is sent out on the mesh channel
+              for devices without TAK. Requires TAK ingest + a TAK Server feed to be on.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 flex-shrink-0">
+            <span className={`text-sm font-medium ${form.chatBridgeEnabled ? 'text-cyan-300' : 'text-slate-400'}`}>{form.chatBridgeEnabled ? 'On' : 'Off'}</span>
+            <input type="checkbox" checked={form.chatBridgeEnabled} onChange={(e) => update({ chatBridgeEnabled: e.target.checked })}
+              className="w-5 h-5 text-cyan-600 bg-slate-700 border-slate-600 rounded focus:ring-cyan-500" />
+          </label>
+        </div>
+        <div className="w-40">
+          <label className="block text-xs text-slate-400 mb-1">Mesh channel index to bridge</label>
+          <input type="number" min={0} max={7} value={form.chatBridgeChannelIndex}
+            onChange={(e) => update({ chatBridgeChannelIndex: parseInt(e.target.value) || 0 })}
+            className="input w-full text-sm" />
+          <p className="text-xs text-slate-500 mt-1">e.g. 1 = <span className="font-mono">chopstak</span></p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
