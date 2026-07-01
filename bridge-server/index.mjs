@@ -1459,6 +1459,12 @@ class MeshtasticBridgeServer {
       // Start the durable on-disk message recorder
       this.startMessageRecorder();
 
+      // Push live TAK connection status to clients every few seconds
+      if (this.takStatusTimer) clearInterval(this.takStatusTimer);
+      this.takStatusTimer = setInterval(() => {
+        this.broadcast({ type: 'tak-status', status: this.getTakStatus() });
+      }, 4000);
+
       // Resolve where the server is, to auto-center the Tactical map
       this.resolveStationLocation();
 
@@ -1619,6 +1625,10 @@ class MeshtasticBridgeServer {
 
         case 'get-tak-ingest-config':
           this.sendTakIngestConfig(ws);
+          break;
+
+        case 'get-tak-status':
+          this.sendTakStatus(ws);
           break;
 
         case 'set-tak-ingest-config':
@@ -6445,6 +6455,17 @@ class MeshtasticBridgeServer {
 
   sendTakIngestConfig(ws) {
     ws.send(JSON.stringify({ type: 'tak-ingest-config', config: this.takIngestOptions() }));
+  }
+
+  /** Combined live status of both TAK server connections (feed out + monitor in). */
+  getTakStatus() {
+    const feed = this.cotService?.getFeedStatus?.() || { feedEnabled: false, feedConnected: false };
+    const ingest = this.takIngestService?.getStatus?.() || { ingestEnabled: false, ingestConnected: false };
+    return { ...feed, ...ingest };
+  }
+
+  sendTakStatus(ws) {
+    ws.send(JSON.stringify({ type: 'tak-status', status: this.getTakStatus() }));
   }
 
   async takIngestSetConfig(ws, config) {

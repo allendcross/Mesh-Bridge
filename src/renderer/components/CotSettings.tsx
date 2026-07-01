@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { useStore } from '../store/useStore';
 
@@ -23,68 +23,63 @@ interface CotForm {
 }
 
 const DEFAULTS: CotForm = {
-  enabled: false,
-  multicastEnabled: true,
-  multicastAddr: '239.2.3.1',
-  multicastPort: 6969,
-  tcpHost: '',
-  tcpPort: 8087,
-  publishNodes: true,
-  publishAircraft: true,
-  classifyNodes: true,
-  homeLat: null,
-  homeLon: null,
-  chatBridgeEnabled: false,
-  chatBridgeChannelIndex: 1,
-  teamColor: 'Cyan',
-  callsignPrefix: '',
-  nodeStaleSec: 300,
-  aircraftStaleSec: 60,
+  enabled: false, multicastEnabled: true, multicastAddr: '239.2.3.1', multicastPort: 6969,
+  tcpHost: '', tcpPort: 8087, publishNodes: true, publishAircraft: true, classifyNodes: true,
+  homeLat: null, homeLon: null, chatBridgeEnabled: false, chatBridgeChannelIndex: 1,
+  teamColor: 'Cyan', callsignPrefix: '', nodeStaleSec: 300, aircraftStaleSec: 60,
 };
-
-// ATAK/iTAK standard team colors
+const INGEST_DEFAULTS = { enabled: false, host: '', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
 const TEAM_COLORS = ['White', 'Yellow', 'Orange', 'Magenta', 'Red', 'Maroon', 'Purple', 'Dark Blue', 'Blue', 'Cyan', 'Teal', 'Green', 'Dark Green', 'Brown'];
 
-export default function CotSettings() {
-  const cotConfig = useStore(state => state.cotConfig);
-  const getCotConfig = useStore(state => state.getCotConfig);
-  const setCotConfig = useStore(state => state.setCotConfig);
+// A small colored connection dot: grey=off, amber(pulsing)=connecting, green=connected.
+function Dot({ enabled, connected, title }: { enabled: boolean; connected: boolean; title?: string }) {
+  const cls = !enabled ? 'bg-slate-500' : connected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse';
+  return <span title={title} className={`inline-block w-2.5 h-2.5 rounded-full ${cls}`} />;
+}
 
-  const takIngestConfig = useStore(state => state.takIngestConfig);
-  const getTakIngestConfig = useStore(state => state.getTakIngestConfig);
-  const setTakIngestConfig = useStore(state => state.setTakIngestConfig);
+export default function CotSettings() {
+  const cotConfig = useStore(s => s.cotConfig);
+  const getCotConfig = useStore(s => s.getCotConfig);
+  const setCotConfig = useStore(s => s.setCotConfig);
+  const takIngestConfig = useStore(s => s.takIngestConfig);
+  const getTakIngestConfig = useStore(s => s.getTakIngestConfig);
+  const setTakIngestConfig = useStore(s => s.setTakIngestConfig);
+  const takStatus = useStore(s => s.takStatus);
+  const getTakStatus = useStore(s => s.getTakStatus);
 
   const [form, setForm] = useState<CotForm>(DEFAULTS);
-  const [saved, setSaved] = useState(false);
+  const [ingest, setIngest] = useState<typeof INGEST_DEFAULTS>(INGEST_DEFAULTS);
 
-  // Native ATAK/iTAK enrollment QR — the official TAK Server supports username/password
-  // certificate enrollment, so iTAK's in-app scanner accepts this tak://...enroll QR:
-  // scan -> enter nothing -> it enrolls over TLS and connects. No file handling.
-  const [enrollHost, setEnrollHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
-  const [enrollUser, setEnrollUser] = useState('meshbridge');
-  const [enrollToken, setEnrollToken] = useState('');
-  const [enrollQr, setEnrollQr] = useState('');
+  // Consolidated connection UI state (one shared host drives both directions).
+  const [serverHost, setServerHost] = useState('127.0.0.1');
+  const [sendToServer, setSendToServer] = useState(false);   // outbound feed
+  const [receiveFromServer, setReceiveFromServer] = useState(false); // inbound monitor
+  const [lanBroadcast, setLanBroadcast] = useState(false);   // LAN multicast
+  const [monitorOverride, setMonitorOverride] = useState(false); // monitor uses a different host
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const inited = useRef(false);
 
-  // Data package (the ONLY way to connect iTAK/iOS — it has no cert enrollment).
-  const [pkgHost, setPkgHost] = useState(typeof window !== 'undefined' ? window.location.hostname : '');
-  const [pkgPort, setPkgPort] = useState(8089);
-  const downloadPackage = () => {
-    if (!pkgHost) return;
-    window.location.href = `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(pkgHost)}&port=${pkgPort}&name=MeshBridge`;
-  };
-
-  useEffect(() => {
-    if (!enrollHost || !enrollUser || !enrollToken) { setEnrollQr(''); return; }
-    const url = `tak://com.atakmap.app/enroll?host=${encodeURIComponent(enrollHost)}&username=${encodeURIComponent(enrollUser)}&token=${encodeURIComponent(enrollToken)}`;
-    QRCode.toDataURL(url, { width: 280, margin: 2 }).then(setEnrollQr).catch(() => setEnrollQr(''));
-  }, [enrollHost, enrollUser, enrollToken]);
-
-  useEffect(() => { getCotConfig(); }, [getCotConfig]);
+  useEffect(() => { getCotConfig(); getTakIngestConfig(); getTakStatus(); }, [getCotConfig, getTakIngestConfig, getTakStatus]);
   useEffect(() => { if (cotConfig) setForm(prev => ({ ...prev, ...cotConfig })); }, [cotConfig]);
+  useEffect(() => { if (takIngestConfig) setIngest(prev => ({ ...prev, ...takIngestConfig })); }, [takIngestConfig]);
+
+  // One-time init of the consolidated connection state from the loaded configs.
+  useEffect(() => {
+    if (inited.current || (!cotConfig && !takIngestConfig)) return;
+    const fh = cotConfig?.tcpHost || '';
+    const ih = takIngestConfig?.host || '';
+    setServerHost(fh || ih || '127.0.0.1');
+    setSendToServer(!!fh);
+    setLanBroadcast(cotConfig?.multicastEnabled ?? false);
+    setReceiveFromServer(takIngestConfig?.enabled ?? false);
+    if (fh && ih && fh !== ih) setMonitorOverride(true);
+    inited.current = true;
+  }, [cotConfig, takIngestConfig]);
 
   const update = (patch: Partial<CotForm>) => setForm(prev => ({ ...prev, ...patch }));
+  const updateIngest = (patch: Partial<typeof INGEST_DEFAULTS>) => setIngest(prev => ({ ...prev, ...patch }));
 
-  // Bridge home location (overrides the bridge's own radio GPS in TAK).
+  // Bridge home location geocode
   const [homeAddress, setHomeAddress] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const [geoError, setGeoError] = useState('');
@@ -94,362 +89,281 @@ export default function CotSettings() {
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(homeAddress)}`);
       const data = await res.json();
-      if (data && data[0]) {
-        update({ homeLat: parseFloat(data[0].lat), homeLon: parseFloat(data[0].lon) });
-      } else {
-        setGeoError('Address not found — enter lat/lon manually.');
-      }
-    } catch {
-      setGeoError('Lookup failed (no internet?) — enter lat/lon manually.');
-    } finally {
-      setGeocoding(false);
-    }
+      if (data && data[0]) update({ homeLat: parseFloat(data[0].lat), homeLon: parseFloat(data[0].lon) });
+      else setGeoError('Address not found — enter lat/lon manually.');
+    } catch { setGeoError('Lookup failed (no internet?) — enter lat/lon manually.'); }
+    finally { setGeocoding(false); }
   };
 
-  // ===== TAK Ingest (inbound CoT — the monitoring map's common operating picture) =====
-  const INGEST_DEFAULTS = { enabled: false, host: '192.168.0.198', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
-  const [ingest, setIngest] = useState<typeof INGEST_DEFAULTS>(INGEST_DEFAULTS);
-  const [ingestSaved, setIngestSaved] = useState(false);
-  useEffect(() => { getTakIngestConfig(); }, [getTakIngestConfig]);
-  useEffect(() => { if (takIngestConfig) setIngest(prev => ({ ...prev, ...takIngestConfig })); }, [takIngestConfig]);
-  const updateIngest = (patch: Partial<typeof INGEST_DEFAULTS>) => setIngest(prev => ({ ...prev, ...patch }));
-  const handleIngestSave = () => {
-    setTakIngestConfig(ingest);
-    setIngestSaved(true);
-    setTimeout(() => setIngestSaved(false), 2500);
+  // Phone-onboarding (data package + enrollment QR)
+  const [pkgPort, setPkgPort] = useState(8089);
+  const [enrollUser, setEnrollUser] = useState('meshbridge');
+  const [enrollToken, setEnrollToken] = useState('');
+  const [enrollQr, setEnrollQr] = useState('');
+  const phoneHost = serverHost || (typeof window !== 'undefined' ? window.location.hostname : '');
+  const downloadPackage = () => {
+    if (!phoneHost) return;
+    window.location.href = `${window.location.origin}/api/tak-datapackage?host=${encodeURIComponent(phoneHost)}&port=${pkgPort}&name=MeshBridge`;
   };
+  useEffect(() => {
+    if (!phoneHost || !enrollUser || !enrollToken) { setEnrollQr(''); return; }
+    const url = `tak://com.atakmap.app/enroll?host=${encodeURIComponent(phoneHost)}&username=${encodeURIComponent(enrollUser)}&token=${encodeURIComponent(enrollToken)}`;
+    QRCode.toDataURL(url, { width: 280, margin: 2 }).then(setEnrollQr).catch(() => setEnrollQr(''));
+  }, [phoneHost, enrollUser, enrollToken]);
 
+  // Save everything (both connections) in one action.
   const handleSave = () => {
-    setCotConfig(form);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    const host = serverHost.trim();
+    const monHost = (monitorOverride ? (ingest.host || host) : host).trim();
+    setCotConfig({ ...form, enabled: sendToServer || lanBroadcast, tcpHost: sendToServer ? host : '', multicastEnabled: lanBroadcast });
+    setTakIngestConfig({ ...ingest, enabled: receiveFromServer, host: monHost });
+    setSaveState('saving');
+    setTimeout(() => { setSaveState('saved'); setTimeout(() => setSaveState('idle'), 3000); }, 1200);
   };
+
+  // Live status
+  const st = takStatus || {};
+  const feedUp = sendToServer && !!st.feedConnected;
+  const monUp = receiveFromServer && !!st.ingestConnected;
+  const anyOn = sendToServer || receiveFromServer || lanBroadcast;
+  const anyUp = feedUp || monUp || lanBroadcast;
+  const rollup = !anyOn ? { text: 'Not connected', cls: 'bg-slate-700/40 border-slate-600', dot: 'bg-slate-500' }
+    : anyUp ? { text: 'Connected to TAK server', cls: 'bg-emerald-500/10 border-emerald-500/40', dot: 'bg-emerald-500' }
+    : { text: 'Connecting… (check address & port)', cls: 'bg-amber-500/10 border-amber-500/40', dot: 'bg-amber-500 animate-pulse' };
+  const geoChatReady = sendToServer && receiveFromServer;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h2 className="text-3xl font-bold text-white mb-2">TAK Feed (Cursor-on-Target)</h2>
-        <p className="text-slate-400">Publish mesh nodes and aircraft to ATAK/iTAK — via LAN multicast and/or a TAK server.</p>
+        <h2 className="text-3xl font-bold text-white mb-1">TAK Server Connection</h2>
+        <p className="text-slate-400 text-sm">Share your mesh nodes, aircraft, and chat with ATAK / iTAK — and show other TAK users on your map. <span className="text-slate-500">(Uses the Cursor-on-Target / CoT protocol.)</span></p>
       </div>
 
-      {/* Status / master toggle */}
-      <div className={`card p-4 ${form.enabled ? 'bg-green-500/10 border border-green-500/30' : 'bg-slate-700/30 border border-slate-600'}`}>
-        <div className="flex items-center justify-between">
+      {/* Rollup status */}
+      <div className={`card p-4 border ${rollup.cls}`}>
+        <div className="flex items-center gap-3">
+          <span className={`inline-block w-3 h-3 rounded-full ${rollup.dot}`} />
           <div>
-            <p className="text-white font-medium">🪖 TAK feed is {form.enabled ? 'ENABLED' : 'disabled'}</p>
-            <p className="text-sm text-slate-300 mt-1">
-              {form.multicastEnabled && `Multicast ${form.multicastAddr}:${form.multicastPort}`}
-              {form.multicastEnabled && form.tcpHost && ' · '}
-              {form.tcpHost && `TAK server ${form.tcpHost}:${form.tcpPort}`}
-              {!form.multicastEnabled && !form.tcpHost && 'No outputs configured'}
+            <p className="text-white font-medium">{rollup.text}</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {sendToServer && <>Send {st.feedConnected ? '✅' : '⏳'} {st.feedTarget || ''} </>}
+              {receiveFromServer && <>· Monitor {st.ingestConnected ? '✅' : '⏳'} {st.ingestTarget || ''} </>}
+              {lanBroadcast && <>· LAN broadcast on </>}
+              {!anyOn && 'Nothing is turned on yet.'}
             </p>
           </div>
-          <label className="flex items-center gap-2">
-            <span className={`text-sm font-medium ${form.enabled ? 'text-green-400' : 'text-slate-400'}`}>{form.enabled ? 'On' : 'Off'}</span>
-            <input type="checkbox" checked={form.enabled} onChange={(e) => update({ enabled: e.target.checked })}
-              className="w-5 h-5 text-green-600 bg-slate-700 border-slate-600 rounded focus:ring-green-500" />
-          </label>
         </div>
       </div>
 
-      {/* Outputs */}
+      {/* ===== TAK Server Connection panel ===== */}
       <div className="card p-6 space-y-4">
-        <h3 className="text-lg font-bold text-white">Outputs</h3>
-
-        {/* Multicast */}
-        <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-          <label className="flex items-center gap-2 mb-2">
-            <input type="checkbox" checked={form.multicastEnabled} onChange={(e) => update({ multicastEnabled: e.target.checked })} className="w-4 h-4" />
-            <span className="text-white font-medium">📡 LAN Multicast</span>
-            <span className="text-xs text-slate-400">— ATAK auto-discovers on the local subnet (won't traverse Tailscale/WAN)</span>
-          </label>
-          <div className="grid grid-cols-2 gap-3 ml-6">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Group address</label>
-              <input type="text" value={form.multicastAddr} onChange={(e) => update({ multicastAddr: e.target.value })} className="input w-full text-sm font-mono" />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Port</label>
-              <input type="number" value={form.multicastPort} onChange={(e) => update({ multicastPort: parseInt(e.target.value) || 6969 })} className="input w-full text-sm" />
-            </div>
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-200 mb-1">Server address</label>
+          <input type="text" value={serverHost} onChange={(e) => setServerHost(e.target.value)}
+            placeholder="127.0.0.1 (co-located) or Tailscale/LAN IP" className="input w-full font-mono text-sm" />
+          <p className="text-xs text-slate-500 mt-1">One address for both directions below. Use your Tailscale/LAN IP to reach a server on another machine.</p>
         </div>
 
-        {/* TAK server TCP feed */}
+        {/* Send (outbound feed) */}
         <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
-          <div className="text-white font-medium mb-1">🖧 TAK Server (TCP feed)</div>
-          <p className="text-xs text-slate-400 mb-2">
-            Stream CoT to a TAK Server. Required for remote clients over Tailscale/WAN. Leave host blank to disable.
-          </p>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs text-slate-400 mb-1">Server host/IP</label>
-              <input type="text" value={form.tcpHost} onChange={(e) => update({ tcpHost: e.target.value })} placeholder="127.0.0.1 (local TAK Server, port 8087)" className="input w-full text-sm font-mono" />
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={sendToServer} onChange={(e) => setSendToServer(e.target.checked)} className="w-4 h-4" />
+            <Dot enabled={sendToServer} connected={!!st.feedConnected} title={st.feedLastError || (st.feedConnected ? 'connected' : 'not connected')} />
+            <span className="text-white font-medium">Send to TAK server</span>
+            <span className="text-xs text-slate-400">— push mesh nodes, aircraft &amp; chat UP to the server</span>
+          </label>
+          {st.feedLastError && sendToServer && !st.feedConnected && <p className="text-xs text-amber-400 mt-1 ml-6">last error: {st.feedLastError}</p>}
+        </div>
+
+        {/* Receive (inbound monitor) */}
+        <div className="p-3 rounded-lg bg-slate-800 border border-slate-700 space-y-2">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={receiveFromServer} onChange={(e) => setReceiveFromServer(e.target.checked)} className="w-4 h-4" />
+            <Dot enabled={receiveFromServer} connected={!!st.ingestConnected} title={st.ingestLastError || (st.ingestConnected ? 'connected' : 'not connected')} />
+            <span className="text-white font-medium">Receive from TAK server</span>
+            <span className="text-xs text-slate-400">— show other TAK users' positions, markers &amp; chat on your map</span>
+          </label>
+          {receiveFromServer && (
+            <div className="ml-6 space-y-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Certificate name</label>
+                  <input type="text" value={ingest.certName} onChange={(e) => updateIngest({ certName: e.target.value })} className="input text-sm font-mono w-56" />
+                </div>
+                <span className={`text-xs px-2 py-1 rounded mt-4 ${st.certFound ? 'bg-emerald-600/20 text-emerald-300' : 'bg-red-600/20 text-red-300'}`}>
+                  {st.certFound ? '✓ cert found' : `✗ ${ingest.certName}.pem not found`}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">The cert the bridge uses to prove its identity to the server (created when you set up the server; leave the default if unsure).</p>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={ingest.includeGeoChat} onChange={(e) => updateIngest({ includeGeoChat: e.target.checked })} className="w-4 h-4" /> Include chat (GeoChat)</label>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={ingest.includeDrawings} onChange={(e) => updateIngest({ includeDrawings: e.target.checked })} className="w-4 h-4" /> Include drawings/shapes</label>
+              </div>
+              {st.ingestLastError && !st.ingestConnected && <p className="text-xs text-amber-400">last error: {st.ingestLastError}</p>}
             </div>
+          )}
+        </div>
+
+        {/* Advanced */}
+        <details className="text-sm">
+          <summary className="cursor-pointer text-slate-400 hover:text-slate-200 select-none">Advanced (ports &amp; overrides)</summary>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Port</label>
+              <label className="block text-xs text-slate-400 mb-1">Outbound port <span className="text-slate-600">(8087 = plaintext feed)</span></label>
               <input type="number" value={form.tcpPort} onChange={(e) => update({ tcpPort: parseInt(e.target.value) || 8087 })} className="input w-full text-sm" />
             </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Monitor port <span className="text-slate-600">(8089 = secure/TLS)</span></label>
+              <input type="number" value={ingest.port} onChange={(e) => updateIngest({ port: parseInt(e.target.value) || 8089 })} className="input w-full text-sm" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2 text-slate-300">
+                <input type="checkbox" checked={monitorOverride} onChange={(e) => setMonitorOverride(e.target.checked)} className="w-4 h-4" />
+                Monitor uses a different server address
+              </label>
+              {monitorOverride && (
+                <input type="text" value={ingest.host} onChange={(e) => updateIngest({ host: e.target.value })} placeholder="monitor host/IP" className="input w-full text-sm font-mono mt-2" />
+              )}
+              {monitorOverride && ingest.host && ingest.host !== serverHost && (
+                <p className="text-xs text-amber-400 mt-1">Monitor points at a different host than Send.</p>
+              )}
+            </div>
+            <p className="md:col-span-2 text-xs text-slate-600">Reads <span className="font-mono">{ingest.certName}.pem/.key</span> + <span className="font-mono">ca.pem</span> from the TAK certs folder. Only one connection may use a given cert at a time.</p>
           </div>
-        </div>
+        </details>
       </div>
 
-      {/* What to publish */}
-      <div className="card p-6 space-y-4">
-        <h3 className="text-lg font-bold text-white">What to publish</h3>
+      {/* ===== LAN broadcast (no server) ===== */}
+      <div className="card p-4 space-y-2">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={lanBroadcast} onChange={(e) => setLanBroadcast(e.target.checked)} className="w-4 h-4" />
+          <span className="text-white font-medium">📡 Auto-share on this Wi-Fi / LAN</span>
+          <span className="text-xs text-slate-400">— no server needed</span>
+        </label>
+        <p className="text-xs text-slate-500 ml-6">Nearby ATAK phones on the same network find you automatically. Doesn't work over the internet or a VPN like Tailscale.</p>
+        <details className="ml-6 text-sm">
+          <summary className="cursor-pointer text-slate-500 hover:text-slate-300 select-none text-xs">Advanced</summary>
+          <div className="mt-2 grid grid-cols-2 gap-3 max-w-md">
+            <div><label className="block text-xs text-slate-400 mb-1">Broadcast address</label><input type="text" value={form.multicastAddr} onChange={(e) => update({ multicastAddr: e.target.value })} className="input w-full text-sm font-mono" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Port</label><input type="number" value={form.multicastPort} onChange={(e) => update({ multicastPort: parseInt(e.target.value) || 6969 })} className="input w-full text-sm" /></div>
+          </div>
+        </details>
+      </div>
+
+      {/* ===== What to publish ===== */}
+      <div className="card p-6 space-y-3">
+        <h3 className="text-lg font-bold text-white">What to share</h3>
         <div className="flex flex-wrap gap-6">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={form.publishNodes} onChange={(e) => update({ publishNodes: e.target.checked })} className="w-4 h-4" />
-            <span className="text-sm text-slate-300">📟 Mesh nodes (ground units)</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={form.publishAircraft} onChange={(e) => update({ publishAircraft: e.target.checked })} className="w-4 h-4" />
-            <span className="text-sm text-slate-300">✈️ Aircraft (ADS-B)</span>
-          </label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={form.publishNodes} onChange={(e) => update({ publishNodes: e.target.checked })} className="w-4 h-4" /><span className="text-sm text-slate-300">📟 Mesh nodes</span></label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={form.publishAircraft} onChange={(e) => update({ publishAircraft: e.target.checked })} className="w-4 h-4" /><span className="text-sm text-slate-300">✈️ Aircraft (ADS-B)</span></label>
         </div>
         <label className="flex items-start gap-2 p-3 rounded-lg bg-slate-800 border border-slate-700">
           <input type="checkbox" checked={form.classifyNodes} onChange={(e) => update({ classifyNodes: e.target.checked })} className="w-4 h-4 mt-0.5" />
-          <span className="text-sm text-slate-300">
-            🏷️ <span className="font-medium">Classify nodes by role</span>
-            <span className="block text-xs text-slate-500 mt-0.5">
-              Show each node in TAK as a sensor, relay, radio, or unit based on its Meshtastic role —
-              instead of every node appearing as a friendly combat unit. Off = legacy (all <span className="font-mono">a-f-G-U-C</span>).
-            </span>
+          <span className="text-sm text-slate-300">🏷️ <span className="font-medium">Classify nodes by role</span>
+            <span className="block text-xs text-slate-500 mt-0.5">Show each node in TAK as a sensor, relay, radio, or unit based on its Meshtastic role — instead of every node showing as a generic friendly unit.</span>
           </span>
         </label>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Node team color</label>
-            <select value={form.teamColor} onChange={(e) => update({ teamColor: e.target.value })} className="input w-full">
-              {TEAM_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+        <details className="text-sm">
+          <summary className="cursor-pointer text-slate-400 hover:text-slate-200 select-none">Advanced display options</summary>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="block text-xs text-slate-400 mb-1">Node team color</label><select value={form.teamColor} onChange={(e) => update({ teamColor: e.target.value })} className="input w-full text-sm">{TEAM_COLORS.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Callsign prefix</label><input type="text" value={form.callsignPrefix} onChange={(e) => update({ callsignPrefix: e.target.value })} placeholder="(none)" className="input w-full text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Keep a node on the map for (seconds)</label><input type="number" value={form.nodeStaleSec} onChange={(e) => update({ nodeStaleSec: parseInt(e.target.value) || 300 })} className="input w-full text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Keep an aircraft on the map for (seconds)</label><input type="number" value={form.aircraftStaleSec} onChange={(e) => update({ aircraftStaleSec: parseInt(e.target.value) || 60 })} className="input w-full text-sm" /></div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Callsign prefix</label>
-            <input type="text" value={form.callsignPrefix} onChange={(e) => update({ callsignPrefix: e.target.value })} placeholder="(none)" className="input w-full" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Node stale time (s)</label>
-            <input type="number" value={form.nodeStaleSec} onChange={(e) => update({ nodeStaleSec: parseInt(e.target.value) || 300 })} className="input w-full" />
-            <p className="text-xs text-slate-500 mt-1">How long a node track persists in TAK between updates.</p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Aircraft stale time (s)</label>
-            <input type="number" value={form.aircraftStaleSec} onChange={(e) => update({ aircraftStaleSec: parseInt(e.target.value) || 60 })} className="input w-full" />
-            <p className="text-xs text-slate-500 mt-1">How long an aircraft track persists in TAK between updates.</p>
-          </div>
-        </div>
+        </details>
       </div>
 
-      {/* Bridge home location — fixes the bridge's own radio position in TAK */}
-      <div className="card p-6 space-y-3">
-        <h3 className="text-lg font-bold text-white">🏠 Bridge Home Location</h3>
-        <p className="text-sm text-slate-400">
-          The bridge's own radio(s) are stationary here. Set this and their (often wrong) GPS is
-          overridden with this location in TAK — so your relay shows up where it actually is.
-          Leave blank to use the radio's reported GPS.
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={homeAddress}
-            onChange={(e) => setHomeAddress(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') geocodeHome(); }}
-            placeholder="Enter an address (e.g. 6174 Denton Ranch, Las Vegas NV)"
-            className="input flex-1 text-sm"
-          />
-          <button onClick={geocodeHome} disabled={geocoding} className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-white text-sm whitespace-nowrap disabled:opacity-50">
-            {geocoding ? 'Looking up…' : '🔎 Look up'}
-          </button>
-        </div>
-        {geoError && <p className="text-xs text-amber-400">{geoError}</p>}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Latitude</label>
-            <input type="number" step="0.0000001" value={form.homeLat ?? ''} onChange={(e) => update({ homeLat: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" />
+      {/* ===== Bridge home location (collapsed summary) ===== */}
+      <details className="card p-4">
+        <summary className="cursor-pointer select-none flex items-center justify-between">
+          <span className="text-white font-medium">🏠 Bridge Home Location</span>
+          <span className="text-xs text-slate-400">{form.homeLat != null && form.homeLon != null ? `${form.homeLat.toFixed(4)}, ${form.homeLon.toFixed(4)}` : 'using radio GPS'}</span>
+        </summary>
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-slate-400">Your relay's radios are stationary here — set this so they show up in the right spot in TAK (instead of their often-wrong GPS). Blank = use the radio's GPS.</p>
+          <div className="flex gap-2">
+            <input type="text" value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') geocodeHome(); }} placeholder="Enter an address (e.g. 6174 Denton Ranch, Las Vegas NV)" className="input flex-1 text-sm" />
+            <button onClick={geocodeHome} disabled={geocoding} className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-white text-sm whitespace-nowrap disabled:opacity-50">{geocoding ? 'Looking up…' : '🔎 Look up'}</button>
           </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Longitude</label>
-            <input type="number" step="0.0000001" value={form.homeLon ?? ''} onChange={(e) => update({ homeLon: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" />
+          {geoError && <p className="text-xs text-amber-400">{geoError}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs text-slate-400 mb-1">Latitude</label><input type="number" step="0.0000001" value={form.homeLat ?? ''} onChange={(e) => update({ homeLat: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Longitude</label><input type="number" step="0.0000001" value={form.homeLon ?? ''} onChange={(e) => update({ homeLon: e.target.value === '' ? null : parseFloat(e.target.value) })} placeholder="unset" className="input w-full text-sm font-mono" /></div>
           </div>
         </div>
-        <p className="text-xs text-slate-500">
-          Tip: you can also read exact coordinates off the Tactical map's cursor readout, or clear both fields to disable the override.
-        </p>
-      </div>
+      </details>
 
-      {/* GeoChat <-> mesh bridge */}
-      <div className={`card p-6 space-y-3 ${form.chatBridgeEnabled ? 'border border-cyan-500/40' : 'border border-slate-600'}`}>
+      {/* ===== GeoChat text bridge ===== */}
+      <div className={`card p-4 space-y-2 ${form.chatBridgeEnabled ? 'border border-cyan-500/40' : 'border border-slate-600'} ${!geoChatReady ? 'opacity-70' : ''}`}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-white">💬 GeoChat ↔ Mesh Bridge</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Two-way chat relay between a private mesh channel and TAK GeoChat. Mesh messages appear in
-              ATAK/WinTAK/TROP chat for devices without Meshtastic; TAK chat is sent out on the mesh channel
-              for devices without TAK. Requires TAK ingest + a TAK Server feed to be on.
-            </p>
+            <h3 className="text-white font-medium">💬 GeoChat text bridge</h3>
+            <p className="text-sm text-slate-400 mt-0.5">Relay chat between your mesh and TAK's built-in chat (GeoChat), both ways.</p>
           </div>
           <label className="flex items-center gap-2 flex-shrink-0">
             <span className={`text-sm font-medium ${form.chatBridgeEnabled ? 'text-cyan-300' : 'text-slate-400'}`}>{form.chatBridgeEnabled ? 'On' : 'Off'}</span>
-            <input type="checkbox" checked={form.chatBridgeEnabled} onChange={(e) => update({ chatBridgeEnabled: e.target.checked })}
-              className="w-5 h-5 text-cyan-600 bg-slate-700 border-slate-600 rounded focus:ring-cyan-500" />
+            <input type="checkbox" disabled={!geoChatReady} checked={form.chatBridgeEnabled} onChange={(e) => update({ chatBridgeEnabled: e.target.checked })} className="w-5 h-5 text-cyan-600 bg-slate-700 border-slate-600 rounded focus:ring-cyan-500 disabled:opacity-40" />
           </label>
         </div>
-        <div className="w-40">
-          <label className="block text-xs text-slate-400 mb-1">Mesh channel index to bridge</label>
-          <input type="number" min={0} max={7} value={form.chatBridgeChannelIndex}
-            onChange={(e) => update({ chatBridgeChannelIndex: parseInt(e.target.value) || 0 })}
-            className="input w-full text-sm" />
+        {!geoChatReady && <p className="text-xs text-amber-400">Turn on both <strong>Send to TAK server</strong> and <strong>Receive from TAK server</strong> above to use the chat bridge.</p>}
+        <div className="w-44">
+          <label className="block text-xs text-slate-400 mb-1">Mesh channel to bridge</label>
+          <input type="number" min={0} max={7} value={form.chatBridgeChannelIndex} onChange={(e) => update({ chatBridgeChannelIndex: parseInt(e.target.value) || 0 })} className="input w-full text-sm" />
           <p className="text-xs text-slate-500 mt-1">e.g. 1 = <span className="font-mono">chopstak</span></p>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button onClick={handleSave} className="btn-primary">💾 Save TAK Feed Settings</button>
-        {saved && <span className="text-sm text-green-400">✓ Saved — applied to the live feed.</span>}
+      {/* ===== Save ===== */}
+      <div className="flex items-center gap-3 sticky bottom-0 py-3 bg-gradient-to-t from-slate-950 to-transparent">
+        <button onClick={handleSave} className="btn-primary">💾 Save TAK Settings</button>
+        {saveState === 'saving' && <span className="text-sm text-amber-300">Saving — reconnecting…</span>}
+        {saveState === 'saved' && <span className="text-sm text-emerald-400">Saved — watch the status dots above to confirm.</span>}
       </div>
 
-      {/* TAK Ingest / Monitor — inbound CoT (the reverse direction of the feed above) */}
-      <div className={`card p-6 space-y-4 ${ingest.enabled ? 'border border-purple-500/40' : 'border border-slate-600'}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-white">🛰️ TAK Ingest (Monitor)</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Subscribe to the TAK Server and show other clients' positions, markers, drawings, and GeoChat
-              on the Tactical map. Needs a client cert (<span className="font-mono">{ingest.certName}</span>) registered on the server.
-            </p>
-          </div>
-          <label className="flex items-center gap-2 flex-shrink-0">
-            <span className={`text-sm font-medium ${ingest.enabled ? 'text-purple-300' : 'text-slate-400'}`}>{ingest.enabled ? 'On' : 'Off'}</span>
-            <input type="checkbox" checked={ingest.enabled} onChange={(e) => updateIngest({ enabled: e.target.checked })}
-              className="w-5 h-5 text-purple-600 bg-slate-700 border-slate-600 rounded focus:ring-purple-500" />
-          </label>
-        </div>
+      {/* ===== Connect a phone/client (collapsed) ===== */}
+      <details className="card p-4">
+        <summary className="cursor-pointer select-none text-white font-medium">📲 Connect a Phone or Client to the TAK Server</summary>
+        <div className="mt-4 space-y-5">
+          <p className="text-sm text-slate-400">These help a <em>phone or laptop</em> connect to your TAK server — separate from the bridge's own connection above. Host is prefilled from your server address (edit it to a phone-reachable address like a Tailscale IP if needed).</p>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2">
-            <label className="block text-xs text-slate-400 mb-1">TAK Server host/IP</label>
-            <input type="text" value={ingest.host} onChange={(e) => updateIngest({ host: e.target.value })} className="input w-full text-sm font-mono" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">CoT port (TLS)</label>
-            <input type="number" value={ingest.port} onChange={(e) => updateIngest({ port: parseInt(e.target.value) || 8089 })} className="input w-full text-sm" />
-          </div>
-        </div>
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">Client cert name (in the TAK certs folder)</label>
-          <input type="text" value={ingest.certName} onChange={(e) => updateIngest({ certName: e.target.value })} className="input w-full text-sm font-mono" />
-          <p className="text-xs text-slate-500 mt-1">Reads <span className="font-mono">{ingest.certName}.pem/.key</span> + <span className="font-mono">ca.pem</span>. Use a dedicated cert; only one connection may use it at a time.</p>
-        </div>
-        <div className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" checked={ingest.includeGeoChat} onChange={(e) => updateIngest({ includeGeoChat: e.target.checked })} className="w-4 h-4" />
-            Include GeoChat
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" checked={ingest.includeDrawings} onChange={(e) => updateIngest({ includeDrawings: e.target.checked })} className="w-4 h-4" />
-            Include drawings/shapes
-          </label>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleIngestSave} className="btn-primary">💾 Save Ingest Settings</button>
-          {ingestSaved && <span className="text-sm text-green-400">✓ Saved — reconnecting ingest.</span>}
-        </div>
-      </div>
-
-      {/* Data package — the iTAK path (iOS has no enrollment) */}
-      <div className="card p-6 space-y-3 border border-green-500/30">
-        <h3 className="text-lg font-bold text-white">📲 iTAK / ATAK — Connection Package (recommended)</h3>
-        <p className="text-sm text-slate-400">
-          Download a data package (CA + client certificate + connection profile) and import it. This is the
-          <strong> only way to connect iTAK (iOS)</strong>, and works for ATAK too — no enrollment needed.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-xs text-slate-400 mb-1">Server host/IP (reachable by the phone)</label>
-            <input type="text" value={pkgHost} onChange={(e) => setPkgHost(e.target.value)} placeholder="192.168.0.198 (LAN) or Tailscale IP" className="input w-full text-sm font-mono" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">CoT TLS port</label>
-            <input type="number" value={pkgPort} onChange={(e) => setPkgPort(parseInt(e.target.value) || 8089)} className="input w-full text-sm" />
-          </div>
-        </div>
-        <button onClick={downloadPackage} disabled={!pkgHost} className="btn-primary disabled:opacity-50">⤓ Download Connection Package (.zip)</button>
-        <p className="text-xs text-slate-500">
-          Get <span className="font-mono">MeshBridge.zip</span> onto the phone (AirDrop / email / Files), then open it →
-          <strong> Share → iTAK</strong> (or ATAK) → it imports the certs and the secure server connection automatically.
-          Built from the TAK Server CA at <span className="font-mono">/opt/takserver/tak/certs/files</span>.
-        </p>
-      </div>
-
-      {/* Native enrollment QR — ATAK (Android) only */}
-      <div className="card p-6 space-y-3">
-        <h3 className="text-lg font-bold text-white">⚡ ATAK (Android) Quick-Connect — Enrollment QR</h3>
-        <p className="text-sm text-slate-400">
-          <strong>ATAK only.</strong> Scan with ATAK's built-in QR scanner to enroll with username/password over TLS and
-          auto-download a cert. <em>iTAK (iOS) does not support enrollment</em> — use the connection package above instead.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Server host/IP</label>
-            <input type="text" value={enrollHost} onChange={(e) => setEnrollHost(e.target.value)} className="input w-full text-sm font-mono" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Enrollment username</label>
-            <input type="text" value={enrollUser} onChange={(e) => setEnrollUser(e.target.value)} className="input w-full text-sm font-mono" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Enrollment password/token</label>
-            <input type="text" value={enrollToken} onChange={(e) => setEnrollToken(e.target.value)} placeholder="paste the token" className="input w-full text-sm font-mono" />
-          </div>
-        </div>
-        <div className="flex flex-col md:flex-row gap-5 items-start">
-          <p className="flex-1 text-xs text-slate-500">
-            Enrollment connects to <span className="font-mono">{enrollHost || 'host'}:8446</span> (TAK Server cert enrollment).
-            The user must exist on the TAK Server (e.g. <span className="font-mono">meshbridge</span>); the token is its password.
-            The QR contains those credentials — treat it as a secret. Use your Tailscale IP/host for remote devices.
-          </p>
-          {enrollQr ? (
-            <div className="flex flex-col items-center bg-white rounded-lg p-3 flex-shrink-0">
-              <img src={enrollQr} alt="ATAK/iTAK enrollment QR" width={220} height={220} />
-              <span className="text-xs text-slate-700 mt-1 font-medium">Scan in ATAK/iTAK to enroll</span>
+          {/* Data package */}
+          <div className="p-3 rounded-lg bg-slate-800 border border-green-500/30 space-y-2">
+            <div className="text-white font-medium">Connection Package (recommended · iTAK &amp; ATAK)</div>
+            <p className="text-xs text-slate-400">Download a package (certs + connection profile) and import it on the phone. The only way to connect iTAK (iOS); works for ATAK too.</p>
+            <div className="flex items-end gap-2">
+              <div><label className="block text-xs text-slate-400 mb-1">Port</label><input type="number" value={pkgPort} onChange={(e) => setPkgPort(parseInt(e.target.value) || 8089)} className="input w-24 text-sm" /></div>
+              <button onClick={downloadPackage} disabled={!phoneHost} className="btn-primary disabled:opacity-50">⤓ Download package (.zip)</button>
             </div>
-          ) : (
-            <div className="text-xs text-slate-500 flex-shrink-0 self-center">Enter host, username &amp; token to generate the QR.</div>
-          )}
-        </div>
-      </div>
+            <p className="text-xs text-slate-500">Get <span className="font-mono">MeshBridge.zip</span> onto the phone → open it → Share → iTAK/ATAK → it imports the certs and secure connection.</p>
+          </div>
 
-      {/* Manual connection (alternative to the QR) */}
-      <div className="card p-6 space-y-2">
-        <h3 className="text-lg font-bold text-white">🔧 Manual connection (alternative)</h3>
-        <p className="text-sm text-slate-400">
-          Prefer to add the server by hand in ATAK/iTAK? Use these details. You still need a client certificate,
-          which the server issues during enrollment — so do the QR (or in-app enrollment) at least once, then the
-          connection is reusable.
-        </p>
-        <div className="bg-slate-900 rounded-lg p-3 font-mono text-sm text-slate-200 space-y-1">
-          <div><span className="text-slate-500">Server: </span>{enrollHost || '192.168.0.198'}</div>
-          <div><span className="text-slate-500">CoT (streaming) port: </span>8089  <span className="text-slate-500">(TLS)</span></div>
-          <div><span className="text-slate-500">Enrollment port: </span>8446</div>
-          <div><span className="text-slate-500">Username / token: </span>{enrollUser} / (your enrollment password)</div>
-          <div><span className="text-slate-500">Admin web UI: </span>https://{enrollHost || '192.168.0.198'}:8443 <span className="text-slate-500">(needs admin cert)</span></div>
-        </div>
-        <p className="text-xs text-slate-500">
-          In ATAK: Settings → Network Preferences → Manage Server Connections → add server, enable
-          <strong> "Enroll for client certificate"</strong>, host {enrollHost || '192.168.0.198'}, then sign in with the username/token.
-        </p>
-      </div>
+          {/* Enrollment QR (ATAK) */}
+          <div className="p-3 rounded-lg bg-slate-800 border border-slate-700 space-y-2">
+            <div className="text-white font-medium">ATAK Quick-Connect (Enrollment QR)</div>
+            <p className="text-xs text-slate-400"><strong>ATAK (Android) only.</strong> Scan to enroll with a username/password. iTAK can't enroll — use the package above.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div><label className="block text-xs text-slate-400 mb-1">Username</label><input type="text" value={enrollUser} onChange={(e) => setEnrollUser(e.target.value)} className="input w-full text-sm font-mono" /></div>
+              <div><label className="block text-xs text-slate-400 mb-1">Password / token</label><input type="text" value={enrollToken} onChange={(e) => setEnrollToken(e.target.value)} placeholder="the TAK Server user's password" className="input w-full text-sm font-mono" /></div>
+            </div>
+            {enrollQr ? (
+              <div className="flex items-center gap-3">
+                <div className="bg-white rounded-lg p-2"><img src={enrollQr} alt="ATAK enrollment QR" width={160} height={160} /></div>
+                <p className="text-xs text-slate-500">Scan in ATAK to enroll (host {phoneHost}:8446). The QR holds credentials — treat as secret.</p>
+              </div>
+            ) : <p className="text-xs text-slate-500">Enter username &amp; password to generate the QR.</p>}
+          </div>
 
-      <div className="card p-4 bg-blue-500/10 border border-blue-500/30">
-        <p className="text-xs text-blue-200">
-          <strong>Multicast vs. server:</strong> LAN multicast (above) needs no server but only works on the same subnet.
-          The TAK Server path (TLS, with enrollment) is what reaches remote clients — e.g. over Tailscale, where you'd
-          use your tailnet IP/host instead of {enrollHost || '192.168.0.198'}.
-        </p>
-      </div>
+          {/* Manual */}
+          <div className="p-3 rounded-lg bg-slate-900 border border-slate-700 space-y-1 font-mono text-xs text-slate-200">
+            <div className="font-sans text-white font-medium mb-1">Manual details</div>
+            <div><span className="text-slate-500">Server: </span>{phoneHost || '192.168.0.198'}</div>
+            <div><span className="text-slate-500">CoT (streaming) port: </span>8089 (TLS)</div>
+            <div><span className="text-slate-500">Enrollment port: </span>8446</div>
+            <div><span className="text-slate-500">Admin web UI: </span>https://{phoneHost || '192.168.0.198'}:8443 (needs admin cert)</div>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

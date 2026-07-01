@@ -54,6 +54,9 @@ export class CotIngestService {
     this.stopped = true;
     this.reconnectTimer = null;
     this.identityTimer = null;
+    this.connected = false;
+    this.lastError = null;
+    this.lastConnectedAt = null;
   }
 
   start() {
@@ -99,14 +102,18 @@ export class CotIngestService {
     sock.setEncoding('utf8');
 
     sock.on('secureConnect', () => {
+      this.connected = true;
+      this.lastConnectedAt = new Date().toISOString();
+      this.lastError = null;
       this.log('info', `✅ TAK ingest connected → ${host}:${port}`);
       this.sendIdentity();
       // Re-announce so the server keeps us subscribed in the group.
       this.identityTimer = setInterval(() => this.sendIdentity(), 60000);
     });
     sock.on('data', (chunk) => this.onData(chunk));
-    sock.on('error', (e) => this.log('warn', `⚠️  TAK ingest error: ${e.message}`));
+    sock.on('error', (e) => { this.lastError = e.message; this.log('warn', `⚠️  TAK ingest error: ${e.message}`); });
     sock.on('close', () => {
+      this.connected = false;
       this.clearIdentityTimer();
       if (!this.stopped) {
         this.log('warn', '⚠️  TAK ingest connection closed');
@@ -249,6 +256,27 @@ export class CotIngestService {
     } catch (e) {
       this.log('warn', `⚠️  TAK ingest parse error: ${e.message}`);
     }
+  }
+
+  /** Live status of the inbound subscription (for the UI). */
+  getStatus() {
+    const { certsPath, certName } = this.opts;
+    let certFound = false;
+    try {
+      certFound = !!certsPath && !!certName &&
+        fs.existsSync(join(certsPath, `${certName}.pem`)) &&
+        fs.existsSync(join(certsPath, `${certName}.key`)) &&
+        fs.existsSync(join(certsPath, 'ca.pem'));
+    } catch { /* ignore */ }
+    return {
+      ingestEnabled: !!this.opts.enabled,
+      ingestConnected: !!this.connected,
+      ingestLastError: this.lastError || null,
+      ingestLastConnectedAt: this.lastConnectedAt || null,
+      ingestTarget: this.opts.host ? `${this.opts.host}:${this.opts.port}` : null,
+      certFound,
+      certName: certName || null,
+    };
   }
 
   scheduleReconnect() {

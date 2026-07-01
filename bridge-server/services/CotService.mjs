@@ -73,6 +73,8 @@ export class CotService {
     sock.setKeepAlive(true, 15000);
     sock.on('connect', () => {
       this.tcpConnected = true;
+      this.tcpLastConnectedAt = new Date().toISOString();
+      this.tcpLastError = null;
       try { sock.setNoDelay(true); } catch { /* ignore */ }
       this.log('info', `✅ CoT TCP feed connected → ${this.opts.tcpHost}:${this.opts.tcpPort}`);
     });
@@ -86,9 +88,20 @@ export class CotService {
         this.connectTcp();
       }, 5000);
     };
-    sock.on('error', (e) => { this.log('warn', `⚠️  CoT TCP feed error: ${e.message}`); });
+    sock.on('error', (e) => { this.tcpLastError = e.message; this.log('warn', `⚠️  CoT TCP feed error: ${e.message}`); });
     sock.on('close', () => { retry(); });
     this.tcpSocket = sock;
+  }
+
+  /** Live status of the outbound TCP feed (for the UI). */
+  getFeedStatus() {
+    return {
+      feedEnabled: !!(this.opts.enabled && this.opts.tcpHost),
+      feedConnected: !!this.tcpConnected,
+      feedLastError: this.tcpLastError || null,
+      feedLastConnectedAt: this.tcpLastConnectedAt || null,
+      feedTarget: this.opts.tcpHost ? `${this.opts.tcpHost}:${this.opts.tcpPort}` : null,
+    };
   }
 
   stop() {

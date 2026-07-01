@@ -20,6 +20,7 @@ interface AppStore {
   stationLocation: StationLocation | null; // server/relay location for map auto-center
   cotConfig: any | null; // CoT/TAK output config
   takIngestConfig: any | null; // TAK ingest (inbound CoT) config
+  takStatus: any | null; // live TAK server connection status (feed + monitor)
   messageLog: { records: any[]; days: string[]; query: any }; // durable recorder query result
   messageRecorderStats: any | null; // recorder totals/per-channel/retention
   adsbConfig: any | null; // ADS-B feed config
@@ -108,6 +109,7 @@ interface AppStore {
   // TAK ingest (inbound CoT) Actions
   getTakIngestConfig: () => void;
   setTakIngestConfig: (config: any) => void;
+  getTakStatus: () => void;
 
   // Message recorder Actions
   queryMessageLog: (query: { date?: string | null; channelIndex?: number | null; search?: string; limit?: number }) => void;
@@ -294,6 +296,11 @@ export const useStore = create<AppStore>((set, get) => {
     set({ takIngestConfig: config });
   });
 
+  // Live TAK server connection status (feed out + monitor in)
+  manager.on('tak-status', (status: any) => {
+    set({ takStatus: status });
+  });
+
   // Durable message recorder query results + stats
   manager.on('message-log', (payload: { records: any[]; days: string[]; query: any }) => {
     set({ messageLog: payload });
@@ -370,6 +377,7 @@ export const useStore = create<AppStore>((set, get) => {
     stationLocation: null,
     cotConfig: null,
     takIngestConfig: null,
+    takStatus: null,
     messageLog: { records: [], days: [], query: {} },
     messageRecorderStats: null,
     adsbConfig: null,
@@ -694,6 +702,10 @@ export const useStore = create<AppStore>((set, get) => {
 
     setTakIngestConfig: (config: any) => {
       manager.setTakIngestConfig(config);
+    },
+
+    getTakStatus: () => {
+      manager.requestTakStatus();
     },
 
     queryMessageLog: (query) => {

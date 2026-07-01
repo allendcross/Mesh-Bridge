@@ -489,6 +489,10 @@ export class WebSocketRadioManager {
         this.emit('tak-ingest-config', data.config);
         break;
 
+      case 'tak-status':
+        this.emit('tak-status', data.status || {});
+        break;
+
       case 'message-log':
         this.emit('message-log', { records: data.records || [], days: data.days || [], query: data.query || {} });
         break;
@@ -857,6 +861,12 @@ export class WebSocketRadioManager {
   requestMessageRecorderStats() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'get-message-recorder-stats' }));
+    }
+  }
+
+  requestTakStatus() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'get-tak-status' }));
     }
   }
 
