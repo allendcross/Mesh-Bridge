@@ -6295,6 +6295,22 @@ class MeshtasticBridgeServer {
     return this.getNodeName(from) || null;
   }
 
+  /** Display name of a mesh channel across any connected radio (for the default room). */
+  channelDisplayName(idx) {
+    for (const radio of this.radios.values()) {
+      const ch = radio.channels?.get(idx);
+      const name = ch?.settings?.name || ch?.name;
+      if (name) return name;
+    }
+    return idx === 0 ? 'Public' : `Mesh ch${idx}`;
+  }
+
+  /** The TAK GeoChat room a rule maps to (explicit, else the channel's name). */
+  roomForRule(rule) {
+    const r = (rule.room || '').trim();
+    return r || this.channelDisplayName(Number(rule.channelIndex));
+  }
+
   /** Pick a connected radio to send bridged chat on (prefers one carrying the channel). */
   pickChatBridgeRadio(channelIndex) {
     for (const radio of this.radios.values()) {
@@ -6317,13 +6333,15 @@ class MeshtasticBridgeServer {
       ? `!${(message.from >>> 0).toString(16).padStart(8, '0')}`
       : String(message.from);
     const callsign = this.resolveNodeCallsign(message.from) || nodeId;
+    const room = this.roomForRule(rule);
     this.cotService.publishGeoChat({
       senderUid: `meshtastic-${nodeId}`, // matches the node's CoT marker uid → loop marker + map tie-in
       callsign,
       text: message.text,
+      chatroom: room,
       messageId: `${message.id || Date.now()}`,
     });
-    console.log(`💬↗ Mesh→TAK GeoChat (ch${ch}) from ${callsign}: "${message.text}"`);
+    console.log(`💬↗ Mesh→TAK GeoChat [${room}] (ch${ch}) from ${callsign}: "${message.text}"`);
   }
 
   /** TAK → Mesh: relay an inbound GeoChat onto every mesh channel whose rule allows takToMesh. */
@@ -6331,8 +6349,12 @@ class MeshtasticBridgeServer {
     if (!this.chatBridgeEnabled || !chat || !chat.text) return;
     // our own echo (mesh-origin GeoChat relayed back by the server)
     if (String(chat.senderUid || '').startsWith('meshtastic-') || String(chat.uid || '').includes('meshrelay')) return;
-    const targets = (this.chatBridges || []).filter(b => b.direction === 'both' || b.direction === 'takToMesh');
-    if (!targets.length) return; // e.g. public channel is meshToTak-only → never spammed
+    // Only relay to channels whose room matches the room this message was sent in,
+    // and whose direction allows TAK→mesh (so a meshToTak-only/public channel is never spammed).
+    const room = chat.room || 'All Chat Rooms';
+    const targets = (this.chatBridges || []).filter(b =>
+      (b.direction === 'both' || b.direction === 'takToMesh') && this.roomForRule(b) === room);
+    if (!targets.length) return;
     if (chat.uid) {
       if (this.seenGeoChatUids.has(chat.uid)) return;
       this.seenGeoChatUids.add(chat.uid);
@@ -6411,7 +6433,7 @@ class MeshtasticBridgeServer {
       if (config.chatBridgeEnabled !== undefined) this.chatBridgeEnabled = config.chatBridgeEnabled;
       if (Array.isArray(config.chatBridges)) {
         this.chatBridges = config.chatBridges
-          .map(b => ({ channelIndex: Number(b.channelIndex), direction: ['both', 'meshToTak', 'takToMesh'].includes(b.direction) ? b.direction : 'both' }))
+          .map(b => ({ channelIndex: Number(b.channelIndex), direction: ['both', 'meshToTak', 'takToMesh'].includes(b.direction) ? b.direction : 'both', room: (b.room || '').trim() }))
           .filter(b => Number.isInteger(b.channelIndex) && b.channelIndex >= 0);
       }
       if (config.teamColor) this.cotTeamColor = config.teamColor;

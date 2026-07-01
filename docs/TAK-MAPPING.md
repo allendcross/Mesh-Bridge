@@ -80,9 +80,15 @@ and vice-versa.
   that direction. So e.g. **ch1 chopstak = `both`** (two-way) while **ch0 public =
   `meshToTak`** — public mesh chat shows in TAK, but TAK chat is never sent back to
   the public channel (no spam). Migrates the old single `chatBridgeChannelIndex`.
-- Config toggle + per-channel rule editor in **TAK Server Connection → GeoChat text
-  bridge**. Verified: an injected TAK GeoChat relayed on ch1 with no loop; ch0 rule
-  loaded (public→TAK one-way).
+- **Per-channel TAK chat room:** each rule has a `room` (default = the mesh channel's
+  name). mesh→TAK sends to that GeoChat room; TAK→mesh only pulls a message back to a
+  channel if the message's room matches that channel's rule. So channels stay visually
+  separated in TAK — e.g. `chopstak` chat lands in a "chopstak" room and public in a
+  "Public" room, instead of everything piling into "All Chat Rooms". The room name is
+  threaded consistently through the CoT `uid` / `chatroom` / `__chat id` / `chatgrp id`.
+- Config toggle + per-channel rule editor (channel · direction · room) in **TAK Server
+  Connection → GeoChat text bridge**. Verified: injected TAK GeoChat relayed on ch1 with
+  no loop; public→TAK one-way; named-room XML well-formed.
 
 ## 4. AI SITREPs + SOS alerts (PLANNED)
 

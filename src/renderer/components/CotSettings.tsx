@@ -15,7 +15,7 @@ interface CotForm {
   homeLat: number | null;
   homeLon: number | null;
   chatBridgeEnabled: boolean;
-  chatBridges: Array<{ channelIndex: number; direction: 'both' | 'meshToTak' | 'takToMesh' }>;
+  chatBridges: Array<{ channelIndex: number; direction: 'both' | 'meshToTak' | 'takToMesh'; room?: string }>;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -317,22 +317,25 @@ export default function CotSettings() {
         <div className="space-y-2">
           <label className="block text-xs text-slate-400">Channels to bridge (and direction)</label>
           {bridges.length === 0 && <p className="text-xs text-slate-600">No channels — add one below.</p>}
+          <div className="hidden sm:grid grid-cols-[3rem_9rem_1fr_1.5rem] gap-2 text-[10px] uppercase tracking-wide text-slate-600">
+            <span>Ch</span><span>Direction</span><span>TAK chat room</span><span></span>
+          </div>
           {bridges.map((b, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Ch</span>
-              <input type="number" min={0} max={7} value={b.channelIndex} onChange={(e) => updateBridge(i, { channelIndex: parseInt(e.target.value) || 0 })} className="input w-16 text-sm" />
+            <div key={i} className="grid grid-cols-[3rem_9rem_1fr_1.5rem] gap-2 items-center">
+              <input type="number" min={0} max={7} value={b.channelIndex} onChange={(e) => updateBridge(i, { channelIndex: parseInt(e.target.value) || 0 })} className="input text-sm" />
               <select value={b.direction} onChange={(e) => updateBridge(i, { direction: e.target.value as any })} className="input text-sm">
                 <option value="both">↔ Both ways</option>
-                <option value="meshToTak">↗ Mesh → TAK only</option>
-                <option value="takToMesh">↘ TAK → Mesh only</option>
+                <option value="meshToTak">↗ Mesh → TAK</option>
+                <option value="takToMesh">↘ TAK → Mesh</option>
               </select>
-              <button onClick={() => removeBridge(i)} title="Remove" className="text-slate-500 hover:text-red-400 text-sm px-1">✕</button>
+              <input type="text" value={b.room ?? ''} onChange={(e) => updateBridge(i, { room: e.target.value })} placeholder="(channel name)" className="input text-sm" />
+              <button onClick={() => removeBridge(i)} title="Remove" className="text-slate-500 hover:text-red-400 text-sm">✕</button>
             </div>
           ))}
           <button onClick={addBridge} className="text-xs text-cyan-400 hover:text-cyan-300">+ Add channel</button>
           <p className="text-xs text-slate-500">
-            e.g. ch1 <span className="font-mono">chopstak</span> = Both · ch0 public = Mesh→TAK only (see it in TAK without spamming the public channel back).
-            <span className="text-amber-400"> ⚠ Public channels can be busy — that's a lot of TAK chat.</span>
+            Each channel goes to its own <strong>TAK chat room</strong> so you can tell them apart (blank = named after the channel, e.g. <span className="font-mono">chopstak</span> / <span className="font-mono">Public</span>). Set a room to <span className="font-mono">All Chat Rooms</span> to use TAK's global room.
+            <span className="text-amber-400"> ⚠ Public channels can be busy.</span>
           </p>
         </div>
       </div>
