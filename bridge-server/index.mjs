@@ -6272,11 +6272,12 @@ class MeshtasticBridgeServer {
 
   // ===== GeoChat ↔ mesh bridge =====
 
-  /** Resolve a node number to a callsign from the protocol's node catalog. */
+  /** Resolve a node number to a callsign from the protocol's node catalog.
+   *  Prefer the long name (more identifiable in TAK chat) over the short name. */
   resolveNodeCallsign(from) {
     for (const radio of this.radios.values()) {
       const n = radio.protocol?.getNodeFromCatalog?.(from);
-      if (n && (n.shortName || n.longName)) return n.shortName || n.longName;
+      if (n && (n.longName || n.shortName)) return n.longName || n.shortName;
     }
     return this.getNodeName(from) || null;
   }
