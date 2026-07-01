@@ -15,7 +15,7 @@ interface CotForm {
   homeLat: number | null;
   homeLon: number | null;
   chatBridgeEnabled: boolean;
-  chatBridgeChannelIndex: number;
+  chatBridges: Array<{ channelIndex: number; direction: 'both' | 'meshToTak' | 'takToMesh' }>;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -25,7 +25,7 @@ interface CotForm {
 const DEFAULTS: CotForm = {
   enabled: false, multicastEnabled: true, multicastAddr: '239.2.3.1', multicastPort: 6969,
   tcpHost: '', tcpPort: 8087, publishNodes: true, publishAircraft: true, classifyNodes: true,
-  homeLat: null, homeLon: null, chatBridgeEnabled: false, chatBridgeChannelIndex: 1,
+  homeLat: null, homeLon: null, chatBridgeEnabled: false, chatBridges: [{ channelIndex: 1, direction: 'both' }],
   teamColor: 'Cyan', callsignPrefix: '', nodeStaleSec: 300, aircraftStaleSec: 60,
 };
 const INGEST_DEFAULTS = { enabled: false, host: '', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
@@ -78,6 +78,13 @@ export default function CotSettings() {
 
   const update = (patch: Partial<CotForm>) => setForm(prev => ({ ...prev, ...patch }));
   const updateIngest = (patch: Partial<typeof INGEST_DEFAULTS>) => setIngest(prev => ({ ...prev, ...patch }));
+
+  // Per-channel chat bridge rule helpers
+  const bridges = form.chatBridges || [];
+  const updateBridge = (i: number, patch: Partial<CotForm['chatBridges'][number]>) =>
+    update({ chatBridges: bridges.map((b, idx) => idx === i ? { ...b, ...patch } : b) });
+  const addBridge = () => update({ chatBridges: [...bridges, { channelIndex: 0, direction: 'meshToTak' }] });
+  const removeBridge = (i: number) => update({ chatBridges: bridges.filter((_, idx) => idx !== i) });
 
   // Bridge home location geocode
   const [homeAddress, setHomeAddress] = useState('');
@@ -307,10 +314,26 @@ export default function CotSettings() {
           </label>
         </div>
         {!geoChatReady && <p className="text-xs text-amber-400">Turn on both <strong>Send to TAK server</strong> and <strong>Receive from TAK server</strong> above to use the chat bridge.</p>}
-        <div className="w-44">
-          <label className="block text-xs text-slate-400 mb-1">Mesh channel to bridge</label>
-          <input type="number" min={0} max={7} value={form.chatBridgeChannelIndex} onChange={(e) => update({ chatBridgeChannelIndex: parseInt(e.target.value) || 0 })} className="input w-full text-sm" />
-          <p className="text-xs text-slate-500 mt-1">e.g. 1 = <span className="font-mono">chopstak</span></p>
+        <div className="space-y-2">
+          <label className="block text-xs text-slate-400">Channels to bridge (and direction)</label>
+          {bridges.length === 0 && <p className="text-xs text-slate-600">No channels — add one below.</p>}
+          {bridges.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">Ch</span>
+              <input type="number" min={0} max={7} value={b.channelIndex} onChange={(e) => updateBridge(i, { channelIndex: parseInt(e.target.value) || 0 })} className="input w-16 text-sm" />
+              <select value={b.direction} onChange={(e) => updateBridge(i, { direction: e.target.value as any })} className="input text-sm">
+                <option value="both">↔ Both ways</option>
+                <option value="meshToTak">↗ Mesh → TAK only</option>
+                <option value="takToMesh">↘ TAK → Mesh only</option>
+              </select>
+              <button onClick={() => removeBridge(i)} title="Remove" className="text-slate-500 hover:text-red-400 text-sm px-1">✕</button>
+            </div>
+          ))}
+          <button onClick={addBridge} className="text-xs text-cyan-400 hover:text-cyan-300">+ Add channel</button>
+          <p className="text-xs text-slate-500">
+            e.g. ch1 <span className="font-mono">chopstak</span> = Both · ch0 public = Mesh→TAK only (see it in TAK without spamming the public channel back).
+            <span className="text-amber-400"> ⚠ Public channels can be busy — that's a lot of TAK chat.</span>
+          </p>
         </div>
       </div>
 

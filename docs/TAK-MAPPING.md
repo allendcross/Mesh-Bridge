@@ -74,9 +74,15 @@ and vice-versa.
     TAK→mesh relay) always reads as own-radio and is never re-sent to TAK.
   - The ingest drops any GeoChat whose uid contains `meshrelay` (the server's echo
     of our own mesh-origin GeoChat), plus a seen-uid dedup set.
-- Config: `cot.chatBridgeEnabled` + `cot.chatBridgeChannelIndex`; toggle in
-  **TAK Feed settings → GeoChat ↔ Mesh Bridge**. Verified: an injected TAK GeoChat
-  relayed and transmitted on ch1 with no loop.
+- **Per-channel direction:** `cot.chatBridges` is a list of `{ channelIndex,
+  direction }` where direction = `both` | `meshToTak` | `takToMesh`. Mesh→TAK fires
+  for any channel whose rule allows it; TAK→Mesh only sends to channels allowing
+  that direction. So e.g. **ch1 chopstak = `both`** (two-way) while **ch0 public =
+  `meshToTak`** — public mesh chat shows in TAK, but TAK chat is never sent back to
+  the public channel (no spam). Migrates the old single `chatBridgeChannelIndex`.
+- Config toggle + per-channel rule editor in **TAK Server Connection → GeoChat text
+  bridge**. Verified: an injected TAK GeoChat relayed on ch1 with no loop; ch0 rule
+  loaded (public→TAK one-way).
 
 ## 4. AI SITREPs + SOS alerts (PLANNED)
 
