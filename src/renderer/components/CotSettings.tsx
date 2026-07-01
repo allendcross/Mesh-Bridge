@@ -16,6 +16,8 @@ interface CotForm {
   homeLon: number | null;
   chatBridgeEnabled: boolean;
   chatBridges: Array<{ channelIndex: number; direction: 'both' | 'meshToTak' | 'takToMesh'; room?: string }>;
+  chatBubblesEnabled: boolean;
+  chatBubbleStaleSec: number;
   teamColor: string;
   callsignPrefix: string;
   nodeStaleSec: number;
@@ -26,6 +28,7 @@ const DEFAULTS: CotForm = {
   enabled: false, multicastEnabled: true, multicastAddr: '239.2.3.1', multicastPort: 6969,
   tcpHost: '', tcpPort: 8087, publishNodes: true, publishAircraft: true, classifyNodes: true,
   homeLat: null, homeLon: null, chatBridgeEnabled: false, chatBridges: [{ channelIndex: 1, direction: 'both' }],
+  chatBubblesEnabled: false, chatBubbleStaleSec: 180,
   teamColor: 'Cyan', callsignPrefix: '', nodeStaleSec: 300, aircraftStaleSec: 60,
 };
 const INGEST_DEFAULTS = { enabled: false, host: '', port: 8089, certName: 'meshbridge-monitor', includeGeoChat: true, includeDrawings: true };
@@ -337,6 +340,21 @@ export default function CotSettings() {
             Each channel goes to its own <strong>TAK chat room</strong> so you can tell them apart (blank = named after the channel, e.g. <span className="font-mono">chopstak</span> / <span className="font-mono">Public</span>). Set a room to <span className="font-mono">All Chat Rooms</span> to use TAK's global room.
             <span className="text-amber-400"> ⚠ Public channels can be busy.</span>
           </p>
+        </div>
+
+        {/* Map bubbles */}
+        <div className="pt-2 border-t border-slate-700/60 space-y-2">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={form.chatBubblesEnabled} onChange={(e) => update({ chatBubblesEnabled: e.target.checked })} className="w-4 h-4" />
+            <span className="text-sm text-slate-300">🗨️ <span className="font-medium">Also show messages as map bubbles</span></span>
+          </label>
+          <p className="text-xs text-slate-500 ml-6">Drops a short-lived text label at the sender's location on the map, so you can see who's talking where. Only for nodes that share a position.</p>
+          {form.chatBubblesEnabled && (
+            <div className="ml-6 w-48">
+              <label className="block text-xs text-slate-400 mb-1">Bubble stays for (seconds)</label>
+              <input type="number" min={15} value={form.chatBubbleStaleSec} onChange={(e) => update({ chatBubbleStaleSec: parseInt(e.target.value) || 180 })} className="input w-full text-sm" />
+            </div>
+          )}
         </div>
       </div>
 

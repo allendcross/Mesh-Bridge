@@ -90,6 +90,17 @@ and vice-versa.
   Connection → GeoChat text bridge**. Verified: injected TAK GeoChat relayed on ch1 with
   no loop; public→TAK one-way; named-room XML well-formed.
 
+## 3b. Map message bubbles ✅ DONE
+
+Optionally show each mesh message as text **on the map near the sender**, so you can
+see who's talking where. When a message is bridged mesh→TAK (any bridged channel,
+public or private), `CotService.publishChatBubble()` drops a short-lived spot marker
+(`b-m-p-s-m`) at the node's last-known position with the message as the marker
+callsign (which TAK renders as a map label). uid `meshtalk-<nodeId>` — one per node,
+replaced on each new message, fading after `cot.chatBubbleStaleSec` (default 180s).
+Only for nodes that share a position; own-radio bubbles use the home override.
+Toggle: **GeoChat text bridge → "Also show messages as map bubbles."**
+
 ## 4. AI SITREPs + SOS alerts (PLANNED)
 
 - **AI SITREPs:** the bridge posts AI summaries as GeoChat into a TAK room (timer

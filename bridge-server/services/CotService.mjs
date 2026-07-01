@@ -258,4 +258,24 @@ export class CotService {
       `</detail></event>`;
     this.send(xml);
   }
+
+  /**
+   * Publish a short-lived "message bubble" marker at a node's location so the
+   * message text shows on the map near whoever sent it. One per node (uid
+   * meshtalk-<id>), replaced on each new message, fading after staleSec.
+   * @param {object} o - { nodeId, label, remarks, lat, lon, staleSec }
+   */
+  publishChatBubble(o) {
+    if (!this.opts.enabled) return;
+    if (typeof o.lat !== 'number' || typeof o.lon !== 'number') return;
+    this.send(this.buildEvent({
+      uid: `meshtalk-${o.nodeId}`,
+      type: 'b-m-p-s-m', // spot / marker point — renders its callsign as a map label
+      lat: o.lat,
+      lon: o.lon,
+      staleSec: o.staleSec || 180,
+      callsign: o.label,
+      remarks: o.remarks,
+    }));
+  }
 }

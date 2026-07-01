@@ -240,6 +240,8 @@ class MeshtasticBridgeServer {
     // e.g. ch1 chopstak 'both' (two-way), ch0 public 'meshToTak' (listen only, don't spam back)
     this.chatBridges = [{ channelIndex: 1, direction: 'both' }];
     this.seenGeoChatUids = new Set();        // dedup inbound GeoChat to avoid re-sending to mesh
+    this.chatBubblesEnabled = false;         // also drop a fading text marker at the sender's location
+    this.chatBubbleStaleSec = 180;           // how long a message bubble stays on the map
     this.cotTeamColor = 'Cyan';              // ATAK team color for nodes
     this.cotMulticastEnabled = true;         // emit UDP multicast (LAN ATAK)
     this.cotTcpHost = '';                    // TCP feed to a TAK server (e.g. FreeTAKServer)
@@ -496,6 +498,8 @@ class MeshtasticBridgeServer {
           if (config.cot.chatBridgeEnabled !== undefined) this.chatBridgeEnabled = config.cot.chatBridgeEnabled;
           if (Array.isArray(config.cot.chatBridges)) this.chatBridges = config.cot.chatBridges;
           else if (config.cot.chatBridgeChannelIndex !== undefined) this.chatBridges = [{ channelIndex: config.cot.chatBridgeChannelIndex, direction: 'both' }];
+          if (config.cot.chatBubblesEnabled !== undefined) this.chatBubblesEnabled = config.cot.chatBubblesEnabled;
+          if (config.cot.chatBubbleStaleSec !== undefined) this.chatBubbleStaleSec = config.cot.chatBubbleStaleSec;
           if (config.cot.teamColor) this.cotTeamColor = config.cot.teamColor;
           if (config.cot.multicastEnabled !== undefined) this.cotMulticastEnabled = config.cot.multicastEnabled;
           if (config.cot.tcpHost !== undefined) this.cotTcpHost = config.cot.tcpHost;
@@ -618,6 +622,8 @@ class MeshtasticBridgeServer {
           homeLon: this.cotHomeLon,
           chatBridgeEnabled: this.chatBridgeEnabled,
           chatBridges: this.chatBridges,
+          chatBubblesEnabled: this.chatBubblesEnabled,
+          chatBubbleStaleSec: this.chatBubbleStaleSec,
           teamColor: this.cotTeamColor,
           multicastEnabled: this.cotMulticastEnabled,
           tcpHost: this.cotTcpHost,
@@ -6200,6 +6206,8 @@ class MeshtasticBridgeServer {
       homeLon: this.cotHomeLon,
       chatBridgeEnabled: this.chatBridgeEnabled,
       chatBridges: this.chatBridges,
+      chatBubblesEnabled: this.chatBubblesEnabled,
+      chatBubbleStaleSec: this.chatBubbleStaleSec,
       teamColor: this.cotTeamColor,
       multicastEnabled: this.cotMulticastEnabled,
       tcpHost: this.cotTcpHost,
@@ -6295,6 +6303,20 @@ class MeshtasticBridgeServer {
     return this.getNodeName(from) || null;
   }
 
+  /** Resolve a node's last-known position (applies the home override for own radios). */
+  resolveNodePosition(from) {
+    if (this.isOwnRadioNode({ num: from }) && typeof this.cotHomeLat === 'number' && typeof this.cotHomeLon === 'number') {
+      return { lat: this.cotHomeLat, lon: this.cotHomeLon };
+    }
+    for (const radio of this.radios.values()) {
+      const n = radio.protocol?.getNodeFromCatalog?.(from);
+      if (n?.position && typeof n.position.latitude === 'number' && typeof n.position.longitude === 'number') {
+        return { lat: n.position.latitude, lon: n.position.longitude };
+      }
+    }
+    return null;
+  }
+
   /** Display name of a mesh channel across any connected radio (for the default room). */
   channelDisplayName(idx) {
     for (const radio of this.radios.values()) {
@@ -6342,6 +6364,22 @@ class MeshtasticBridgeServer {
       messageId: `${message.id || Date.now()}`,
     });
     console.log(`💬↗ Mesh→TAK GeoChat [${room}] (ch${ch}) from ${callsign}: "${message.text}"`);
+
+    // Optionally drop a fading text marker at the sender's location so the message
+    // shows on the map near whoever said it.
+    if (this.chatBubblesEnabled) {
+      const pos = this.resolveNodePosition(message.from);
+      if (pos) {
+        this.cotService.publishChatBubble({
+          nodeId,
+          label: `${callsign}: ${message.text}`.slice(0, 48),
+          remarks: `💬 ${callsign} (ch${ch}): ${message.text}`,
+          lat: pos.lat,
+          lon: pos.lon,
+          staleSec: this.chatBubbleStaleSec,
+        });
+      }
+    }
   }
 
   /** TAK → Mesh: relay an inbound GeoChat onto every mesh channel whose rule allows takToMesh. */
@@ -6436,6 +6474,8 @@ class MeshtasticBridgeServer {
           .map(b => ({ channelIndex: Number(b.channelIndex), direction: ['both', 'meshToTak', 'takToMesh'].includes(b.direction) ? b.direction : 'both', room: (b.room || '').trim() }))
           .filter(b => Number.isInteger(b.channelIndex) && b.channelIndex >= 0);
       }
+      if (config.chatBubblesEnabled !== undefined) this.chatBubblesEnabled = config.chatBubblesEnabled;
+      if (config.chatBubbleStaleSec !== undefined) this.chatBubbleStaleSec = Number(config.chatBubbleStaleSec) || 180;
       if (config.teamColor) this.cotTeamColor = config.teamColor;
       if (config.multicastEnabled !== undefined) this.cotMulticastEnabled = config.multicastEnabled;
       if (config.tcpHost !== undefined) this.cotTcpHost = config.tcpHost;
