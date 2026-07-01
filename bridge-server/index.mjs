@@ -6261,7 +6261,7 @@ class MeshtasticBridgeServer {
       channelName: this.channelNameFor(message.radioId, message.channel ?? 0),
       from,
       fromId: typeof from === 'number' ? `!${(from >>> 0).toString(16).padStart(8, '0')}` : from,
-      fromName: this.getNodeName(from) || null,
+      fromName: this.resolveNodeCallsign(from),
       to: message.to,
       text: message.text,
       radioId: message.radioId,
@@ -6271,6 +6271,15 @@ class MeshtasticBridgeServer {
   }
 
   // ===== GeoChat ↔ mesh bridge =====
+
+  /** Resolve a node number to a callsign from the protocol's node catalog. */
+  resolveNodeCallsign(from) {
+    for (const radio of this.radios.values()) {
+      const n = radio.protocol?.getNodeFromCatalog?.(from);
+      if (n && (n.shortName || n.longName)) return n.shortName || n.longName;
+    }
+    return this.getNodeName(from) || null;
+  }
 
   /** Pick a connected radio to send bridged chat on (prefers one carrying the channel). */
   pickChatBridgeRadio() {
@@ -6288,7 +6297,7 @@ class MeshtasticBridgeServer {
     if (!this.chatBridgeEnabled || !this.cotService) return;
     if ((message.channel ?? 0) !== this.chatBridgeChannelIndex) return;
     if (isFromOurBridgeRadio) return; // our own relays / TAK-origin messages put on mesh
-    const sender = this.getNodeName(message.from) || message.fromId || `node-${message.from}`;
+    const sender = this.resolveNodeCallsign(message.from) || message.fromId || `node-${message.from}`;
     this.cotService.publishGeoChat({
       sender,
       text: message.text,
