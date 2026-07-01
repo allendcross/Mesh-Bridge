@@ -6297,19 +6297,24 @@ class MeshtasticBridgeServer {
     if (!this.chatBridgeEnabled || !this.cotService) return;
     if ((message.channel ?? 0) !== this.chatBridgeChannelIndex) return;
     if (isFromOurBridgeRadio) return; // our own relays / TAK-origin messages put on mesh
-    const sender = this.resolveNodeCallsign(message.from) || message.fromId || `node-${message.from}`;
+    const nodeId = (typeof message.from === 'number')
+      ? `!${(message.from >>> 0).toString(16).padStart(8, '0')}`
+      : String(message.from);
+    const callsign = this.resolveNodeCallsign(message.from) || nodeId;
     this.cotService.publishGeoChat({
-      sender,
+      senderUid: `meshtastic-${nodeId}`, // matches the node's CoT marker uid → loop marker + map tie-in
+      callsign,
       text: message.text,
-      uid: `GeoChat.${sender}.AllChatRooms.meshrelay-${message.id}`,
+      messageId: `${message.id || Date.now()}`,
     });
-    console.log(`💬↗ Mesh→TAK GeoChat from ${sender}: "${message.text}"`);
+    console.log(`💬↗ Mesh→TAK GeoChat from ${callsign}: "${message.text}"`);
   }
 
   /** TAK → Mesh: relay an inbound GeoChat onto the private mesh channel. */
   async handleInboundTakChat(chat) {
     if (!this.chatBridgeEnabled || !chat || !chat.text) return;
-    if (chat.uid && String(chat.uid).includes('meshrelay')) return; // our own echo
+    // our own echo (mesh-origin GeoChat relayed back by the server)
+    if (String(chat.senderUid || '').startsWith('meshtastic-') || String(chat.uid || '').includes('meshrelay')) return;
     if (chat.uid) {
       if (this.seenGeoChatUids.has(chat.uid)) return;
       this.seenGeoChatUids.add(chat.uid);

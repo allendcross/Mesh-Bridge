@@ -176,14 +176,16 @@ export class CotIngestService {
       // --- GeoChat ---
       if (type.startsWith('b-t-f')) {
         if (this.opts.includeGeoChat === false) return;
-        // Drop the server's echo of GeoChat we ourselves relayed up from the mesh
-        // (loop prevention for the chat bridge).
-        if (uid.includes('meshrelay')) return;
         const chat = tag(xml, '__chat');
+        const senderUid = attr(chat, 'senderUid') || tagAttr(xml, 'link', 'uid') || '';
+        // Drop the server's echo of GeoChat we ourselves relayed up from the mesh
+        // (our senderUid is meshtastic-<id>) — loop prevention for the chat bridge.
+        if (senderUid.startsWith('meshtastic-') || uid.includes('meshrelay')) return;
         this.onEvent({
           type: 'tak-chat',
           chat: {
             uid,
+            senderUid,
             room: attr(chat, 'chatroom') || 'All Chat Rooms',
             sender: attr(chat, 'senderCallsign') || tagAttr(xml, 'contact', 'callsign') || 'unknown',
             text: decodeXml(innerText(xml, 'remarks') || ''),
