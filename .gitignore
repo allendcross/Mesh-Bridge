@@ -35,3 +35,6 @@ coverage/
 # TypeScript
 *.tsbuildinfo
 bridge-server/bridge-config.json
+
+# Runtime data (recorded messages, etc.)
+bridge-server/data/
