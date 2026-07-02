@@ -1640,6 +1640,17 @@ class MeshtasticBridgeServer {
           this.sendTakStatus(ws);
           break;
 
+        case 'get-all-nodes': {
+          const nodes = [];
+          for (const radio of this.radios.values()) {
+            if (radio.protocol?.getAllNodesFromCatalog) {
+              for (const n of radio.protocol.getAllNodesFromCatalog()) nodes.push(n);
+            }
+          }
+          ws.send(JSON.stringify({ type: 'all-nodes', nodes }));
+          break;
+        }
+
         case 'set-tak-ingest-config':
           await this.takIngestSetConfig(ws, message.config || {});
           break;
